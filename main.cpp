@@ -25,7 +25,8 @@
 #include <glm/glm.hpp>
 #include <glm/ext.hpp>
 #include <GL/gl3w.h>
-#include <GLFW/glfw3.h>
+#define SDL_MAIN_HANDLED
+#include <SDL.h>
 #include <ospray/ospray.h>
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -140,7 +141,6 @@ void AsyncRenderer::run() {
 	}
 }
 
-void key_callback(GLFWwindow *window, int key, int, int action, int);
 GLuint load_texture(const std::string &file);
 GLuint load_shader_program(const std::string &vshader_src, const std::string &fshader_src);
 
@@ -149,26 +149,23 @@ int main(int argc, const char **argv) {
 		std::cout << "Usage: ./osp360 <obj file>\n";
 		return 1;
 	}
-	if (!glfwInit()) {
+	if (SDL_Init(SDL_INIT_EVERYTHING) != 0) {
 		return 1;
 	}
 
 	ospInit(&argc, argv);
 
-	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-	glfwWindowHint(GLFW_DOUBLEBUFFER, GL_TRUE);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+	SDL_Window *window = SDL_CreateWindow("osp360", SDL_WINDOWPOS_CENTERED,
+			SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_OPENGL);
 
-	GLFWwindow *window = glfwCreateWindow(1280, 720, "osp360", nullptr, nullptr);
 	if (!window) {
-		glfwTerminate();
 		return 1;
 	}
-	glfwSetKeyCallback(window, key_callback);
-	glfwMakeContextCurrent(window);
-	glfwSwapInterval(1);
+	SDL_GLContext ctx = SDL_GL_CreateContext(window);
+	SDL_GL_SetSwapInterval(1);
 
 	if (gl3wInit()) {
 		throw std::runtime_error("Failed to init gl3w");
@@ -268,7 +265,33 @@ int main(int argc, const char **argv) {
 	glUniformMatrix4fv(glGetUniformLocation(shader, "proj_view"), 1, GL_FALSE,
 			glm::value_ptr(proj_view));
 
-	while (!glfwWindowShouldClose(window)) {
+	bool quit = false;
+	while (!quit) {
+		SDL_Event e;
+		while (SDL_PollEvent(&e)) {
+			if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)){
+				quit = true;
+				break;
+			}
+			if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) {
+				switch (e.key.keysym.sym) {
+					case SDLK_w:
+						key_down[0] = e.type == SDL_KEYDOWN;
+						break;
+					case SDLK_s:
+						key_down[1] = e.type == SDL_KEYDOWN;
+						break;
+					case SDLK_a:
+						key_down[2] = e.type == SDL_KEYDOWN;
+						break;
+					case SDLK_d:
+						key_down[3] = e.type == SDL_KEYDOWN;
+						break;
+					default: break;
+				}
+			}
+		}
+
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		glDrawArrays(GL_TRIANGLE_STRIP, 0, CUBE_STRIP.size() / 3);
 
@@ -296,37 +319,18 @@ int main(int argc, const char **argv) {
 			async_renderer.unmap_fb();
 		}
 
-		glfwSwapBuffers(window);
-		glfwPollEvents();
+		SDL_GL_SwapWindow(window);
 	}
 
 	glDeleteProgram(shader);
 	glDeleteTextures(1, &tex);
 	glDeleteBuffers(1, &vbo);
 	glDeleteVertexArrays(1, &vao);
-	glfwDestroyWindow(window);
+
+	SDL_GL_DeleteContext(ctx);
+	SDL_DestroyWindow(window);
+	SDL_Quit();
 	return 0;
-}
-void key_callback(GLFWwindow *window, int key, int, int action, int) {
-	const bool released = action == GLFW_RELEASE;
-	switch (key) {
-		case GLFW_KEY_ESCAPE:
-			glfwSetWindowShouldClose(window, true);
-			break;
-		case GLFW_KEY_W:
-			key_down[0] = !released;
-			break;
-		case GLFW_KEY_S:
-			key_down[1] = !released;
-			break;
-		case GLFW_KEY_A:
-			key_down[2] = !released;
-			break;
-		case GLFW_KEY_D:
-			key_down[3] = !released;
-			break;
-		default: break;
-	}
 }
 GLuint load_texture(const std::string &file) {
 	// Load the image and force it to be RGB8 format
