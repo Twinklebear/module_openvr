@@ -18,16 +18,25 @@
 #include <array>
 #include <iostream>
 #include <vector>
+#include <atomic>
+#include <thread>
+#include <mutex>
 
 #include <glm/glm.hpp>
 #include <glm/ext.hpp>
 #include <GL/gl3w.h>
 #include <GLFW/glfw3.h>
+#include <ospray/ospray.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 // Just using STB image temporarily for developing
 // the environment map viewer part of the code.
 #include "stb_image.h"
+
+// TODO: Just using this for temporary model loading,
+// ideally we'd use OSPRay's app loaders if we can?
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "tiny_obj_loader.h"
 
 static const std::array<float, 42> CUBE_STRIP = {
 	1, 1, -1,
@@ -81,18 +90,71 @@ float cam_phi = 0;
 float cam_theta = 1.3;
 std::array<bool, 4> key_down = {false, false, false, false};
 
+const int PANORAMIC_HEIGHT = 1024;
+const int PANORAMIC_WIDTH = 2 * PANORAMIC_HEIGHT;
+
+struct AsyncRenderer {
+	OSPRenderer renderer;
+	OSPFrameBuffer fb;
+	std::atomic<bool> should_quit, new_pixels;
+
+	AsyncRenderer(OSPRenderer ren, OSPFrameBuffer fb);
+	~AsyncRenderer();
+	const uint32_t* map_fb();
+	void unmap_fb();
+
+private:
+	std::mutex pixel_lock;
+	std::vector<uint32_t> pixels;
+	std::thread render_thread;
+
+	void run();
+};
+AsyncRenderer::AsyncRenderer(OSPRenderer ren, OSPFrameBuffer fb)
+	: renderer(ren), fb(fb), should_quit(false), new_pixels(false),
+	pixels(PANORAMIC_WIDTH * PANORAMIC_HEIGHT, 0)
+{
+	render_thread = std::thread([&](){ run(); });
+}
+AsyncRenderer::~AsyncRenderer() {
+	should_quit.store(true);
+	render_thread.join();
+}
+const uint32_t* AsyncRenderer::map_fb() {
+	pixel_lock.lock();
+	new_pixels.store(false);
+	return pixels.data();
+}
+void AsyncRenderer::unmap_fb() {
+	pixel_lock.unlock();
+}
+void AsyncRenderer::run() {
+	while (!should_quit.load()) {
+		ospRenderFrame(fb, renderer, OSP_FB_COLOR);
+
+		const uint32_t *data = static_cast<const uint32_t*>(ospMapFrameBuffer(fb, OSP_FB_COLOR));
+		std::lock_guard<std::mutex> lock(pixel_lock);
+		std::memcpy(pixels.data(), data, sizeof(uint32_t) * PANORAMIC_WIDTH * PANORAMIC_HEIGHT);
+		new_pixels.store(true);
+		ospUnmapFrameBuffer(data, fb);
+	}
+}
+
 void key_callback(GLFWwindow *window, int key, int, int action, int);
 GLuint load_texture(const std::string &file);
 GLuint load_shader_program(const std::string &vshader_src, const std::string &fshader_src);
 
-int main(int argc, char **argv) {
+int main(int argc, const char **argv) {
 	if (argc < 2) {
-		std::cout << "Usage: ./osp360 <image file>\n";
+		std::cout << "Usage: ./osp360 <obj file>\n";
 		return 1;
 	}
 	if (!glfwInit()) {
 		return 1;
 	}
+
+	ospInit(&argc, argv);
+
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -112,7 +174,75 @@ int main(int argc, char **argv) {
 		throw std::runtime_error("Failed to init gl3w");
 	}
 
-	const GLuint img = load_texture(argv[1]);
+	// Load the model w/ tinyobjloader
+	tinyobj::attrib_t attrib;
+	std::vector<tinyobj::shape_t> shapes;
+	std::vector<tinyobj::material_t> materials;
+	std::string err;
+	bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &err, argv[1],
+			nullptr, true);
+	if (!err.empty()) {
+		std::cerr << "Error loading model: " << err << "\n";
+	}
+	if (!ret) {
+		return 1;
+	}
+
+	OSPModel world = ospNewModel();
+	// Load all the objects into ospray
+	OSPData pos_data = ospNewData(attrib.vertices.size() / 3, OSP_FLOAT3,
+			attrib.vertices.data(), OSP_DATA_SHARED_BUFFER);
+	ospCommit(pos_data);
+	for (size_t s = 0; s < shapes.size(); ++s) {
+		std::cout << "Loading mesh " << shapes[s].name
+			<< ", has " << shapes[s].mesh.indices.size() << " vertices\n";
+		const tinyobj::mesh_t &mesh = shapes[s].mesh;
+		std::vector<int32_t> indices;
+		indices.reserve(mesh.indices.size());
+		for (const auto &idx : mesh.indices) {
+			indices.push_back(idx.vertex_index);
+		}
+		OSPData idx_data = ospNewData(indices.size() / 3, OSP_INT3, indices.data());
+		ospCommit(idx_data);
+		OSPGeometry geom = ospNewGeometry("triangles");
+		ospSetObject(geom, "vertex", pos_data);
+		ospSetObject(geom, "index", idx_data);
+		ospCommit(geom);
+		ospAddGeometry(world, geom);
+	}
+	ospCommit(world);
+
+	OSPFrameBuffer framebuffer = ospNewFrameBuffer(osp::vec2i{PANORAMIC_WIDTH, PANORAMIC_HEIGHT},
+			OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
+	ospFrameBufferClear(framebuffer, OSP_FB_COLOR);
+	OSPCamera camera = ospNewCamera("panoramic");
+	// hard-coded for sponza
+	ospSetVec3f(camera, "pos", osp::vec3f{21, 242, -49});
+	ospSetVec3f(camera, "dir", osp::vec3f{0, 0, 1});
+	ospSetVec3f(camera, "up", osp::vec3f{0, -1, 0});
+	ospSet1f(camera, "fovy", 60.f);
+	ospSet1f(camera, "aspect", 2.f);
+	ospCommit(camera);
+
+	OSPRenderer renderer = ospNewRenderer("ao8");
+	ospSetObject(renderer, "model", world);
+	ospSetObject(renderer, "camera", camera);
+	ospSetVec3f(renderer, "bgColor", osp::vec3f{1, 1, 1});
+	ospCommit(renderer);
+	ospRenderFrame(framebuffer, renderer, OSP_FB_COLOR);
+
+	// Render one initial frame then kick off the background rendering thread
+	const uint32_t *data = static_cast<const uint32_t*>(ospMapFrameBuffer(framebuffer, OSP_FB_COLOR));
+	GLuint tex;
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, PANORAMIC_WIDTH, PANORAMIC_HEIGHT, 0,
+			GL_RGBA, GL_UNSIGNED_BYTE, data);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	ospUnmapFrameBuffer(data, framebuffer);
+
+	AsyncRenderer async_renderer(renderer, framebuffer);
 
 	glClearColor(0, 0, 0, 1);
 	glClearDepth(1);
@@ -160,14 +290,20 @@ int main(int argc, char **argv) {
 		glUniformMatrix4fv(glGetUniformLocation(shader, "proj_view"), 1, GL_FALSE,
 				glm::value_ptr(proj_view));
 
+		if (async_renderer.new_pixels.load()) {
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, PANORAMIC_WIDTH, PANORAMIC_HEIGHT, 0,
+					GL_RGBA, GL_UNSIGNED_BYTE, async_renderer.map_fb());
+			async_renderer.unmap_fb();
+		}
+
 		glfwSwapBuffers(window);
 		glfwPollEvents();
 	}
 
 	glDeleteProgram(shader);
+	glDeleteTextures(1, &tex);
 	glDeleteBuffers(1, &vbo);
 	glDeleteVertexArrays(1, &vao);
-	glDeleteTextures(1, &img);
 	glfwDestroyWindow(window);
 	return 0;
 }
