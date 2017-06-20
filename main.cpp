@@ -27,6 +27,7 @@
 #include <GL/gl3w.h>
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
+#include <openvr.h>
 #include <ospray/ospray.h>
 
 #define STB_IMAGE_IMPLEMENTATION
