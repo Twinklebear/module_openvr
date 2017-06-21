@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef OPENVR_ENABLED
+
 #include <array>
 #include <unordered_map>
 #include <glm/glm.hpp>
@@ -50,4 +52,6 @@ struct OpenVRDisplay {
 	HMDMatrices hmd_mats;
 	std::array<uint32_t, 2> render_dims;
 };
+
+#endif
 

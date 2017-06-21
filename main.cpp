@@ -206,8 +206,9 @@ int main(int argc, const char **argv) {
 	OSPFrameBuffer framebuffer = ospNewFrameBuffer(osp::vec2i{PANORAMIC_WIDTH, PANORAMIC_HEIGHT},
 			OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
 	ospFrameBufferClear(framebuffer, OSP_FB_COLOR);
+
 	OSPCamera camera = ospNewCamera("panoramic");
-	// hard-coded for sponza
+	// TODO: this is hard-coded for sponza
 	ospSetVec3f(camera, "pos", osp::vec3f{21, 242, -49});
 	ospSetVec3f(camera, "dir", osp::vec3f{0, 0, 1});
 	ospSetVec3f(camera, "up", osp::vec3f{0, -1, 0});
@@ -257,10 +258,13 @@ int main(int argc, const char **argv) {
 	glUniform1i(glGetUniformLocation(shader, "envmap"), 1);
 	const GLuint proj_view_unif = glGetUniformLocation(shader, "proj_view");
 
-	// TODO: We need to translate the sponza model so the head is at the middle of it
-	// when we start using the head position for translation?
-
+#ifdef OPENVR_ENABLED
 	OpenVRDisplay vr_display;
+#else
+	const glm::mat4 proj_view = glm::perspective(glm::radians(65.f), 1280.f / 720.f, 0.01f, 10.f)
+		* glm::lookAt(glm::vec3(0), glm::vec3(1, 0, 0), glm::vec3(0, 1, 0));
+	glUniformMatrix4fv(proj_view_unif, 1, GL_FALSE, glm::value_ptr(proj_view));
+#endif
 
 	bool quit = false;
 	while (!quit) {
@@ -279,6 +283,7 @@ int main(int argc, const char **argv) {
 			glActiveTexture(GL_TEXTURE0);
 		}
 
+#ifdef OPENVR_ENABLED
 		vr_display.begin_frame();
 		for (size_t i = 0; i < 2; ++i) {
 			glm::mat4 proj, view;
@@ -293,6 +298,7 @@ int main(int argc, const char **argv) {
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, CUBE_STRIP.size() / 3);
 		}
 		vr_display.submit();
+#endif
 
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		glViewport(0, 0, 1280, 720);

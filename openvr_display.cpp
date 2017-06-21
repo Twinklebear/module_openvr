@@ -1,3 +1,5 @@
+#ifdef OPENVR_ENABLED
+
 #include "openvr_display.h"
 
 GLFramebuffer::GLFramebuffer() {
@@ -112,4 +114,6 @@ void OpenVRDisplay::submit() {
 	compositor->Submit(vr::Eye_Right, &right_eye, NULL, vr::Submit_Default);
 	glFlush();
 }
+
+#endif
 
