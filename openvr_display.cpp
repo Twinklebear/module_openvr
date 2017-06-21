@@ -1,4 +1,3 @@
-#include <iostream>
 #include "openvr_display.h"
 
 GLFramebuffer::GLFramebuffer() {
@@ -48,12 +47,10 @@ OpenVRDisplay::OpenVRDisplay() {
 		throw std::runtime_error("Failed to init OpenVR");
 	}
 	if (!system->IsTrackedDeviceConnected(vr::k_unTrackedDeviceIndex_Hmd)) {
-		assert(false);
 		throw std::runtime_error("HMD is not tracking, check connection");
 	}
 	compositor = vr::VRCompositor();
 	if (!compositor) {
-		assert(false);
 		throw std::runtime_error("Failed to init VR Compositor");
 	}	
 	system->GetRecommendedRenderTargetSize(&render_dims[0], &render_dims[1]);
