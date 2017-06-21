@@ -7,6 +7,8 @@ if they're installed in non-standard locations (or you're on windows) you can sp
 the root directories of each library. For example:
 
 ```
-cmake <...> -DGLM_DIR=<..> -DSDL2_DIR=<..> -DOPENVR_DIR=<..>
+cmake <other OSPRay params> \
+	-DOSPRAY_MODULE_360_VIEWER=ON \
+	-DGLM_DIR=<..> -DSDL2_DIR=<..> -DOPENVR_DIR=<..>
 ```
 
