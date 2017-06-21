@@ -29,11 +29,6 @@
 #include <SDL.h>
 #include <ospray/ospray.h>
 
-#define STB_IMAGE_IMPLEMENTATION
-// Just using STB image temporarily for developing
-// the environment map viewer part of the code.
-#include "stb_image.h"
-
 // TODO: Just using this for temporary model loading,
 // ideally we'd use OSPRay's app loaders if we can?
 #define TINYOBJLOADER_IMPLEMENTATION
@@ -139,7 +134,6 @@ void AsyncRenderer::run() {
 	}
 }
 
-GLuint load_texture(const std::string &file);
 GLuint load_shader_program(const std::string &vshader_src, const std::string &fshader_src);
 
 int main(int argc, const char **argv) {
@@ -316,24 +310,6 @@ int main(int argc, const char **argv) {
 	SDL_DestroyWindow(window);
 	SDL_Quit();
 	return 0;
-}
-GLuint load_texture(const std::string &file) {
-	// Load the image and force it to be RGB8 format
-	int x, y, n;
-	uint8_t *data = stbi_load(file.c_str(), &x, &y, &n, 3);
-	if (!data) {
-		throw std::runtime_error("Could not load image file: " + file);
-	}
-
-	GLuint tex;
-	glGenTextures(1, &tex);
-	glBindTexture(GL_TEXTURE_2D, tex);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, x, y, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-
-	stbi_image_free(data);
-	return tex;
 }
 GLuint compile_shader(const std::string &src, GLenum type) {
 	GLuint shader = glCreateShader(type);
