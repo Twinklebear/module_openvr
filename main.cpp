@@ -27,7 +27,6 @@
 #include <GL/gl3w.h>
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
-#include <openvr.h>
 #include <ospray/ospray.h>
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -39,6 +38,9 @@
 // ideally we'd use OSPRay's app loaders if we can?
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
+
+#include "openvr_display.h"
+#include "gldebug.h"
 
 static const std::array<float, 42> CUBE_STRIP = {
 	1, 1, -1,
@@ -80,17 +82,12 @@ void main(void) {
 	// Note: The panoramic camera uses flipped theta/phi terminology
 	// compared to wolfram alpha or other parametric sphere equations
 	// In the map phi goes along x from [0, 2pi] and theta goes along y [0, pi]
-	float u = (atan(dir.y, dir.x) + PI / 2) / (2 * PI);
-	float v = acos(dir.z) / PI;
+	float u = (atan(dir.z, dir.x) + PI / 2) / (2 * PI);
+	float v = acos(dir.y) / PI;
 	color = texture(envmap, vec2(u, v));
 }
 )";
 
-
-// phi/theta of the camera
-float cam_phi = 0;
-float cam_theta = 1.3;
-std::array<bool, 4> key_down = {false, false, false, false};
 
 const int PANORAMIC_HEIGHT = 1024;
 const int PANORAMIC_WIDTH = 2 * PANORAMIC_HEIGHT;
@@ -159,6 +156,7 @@ int main(int argc, const char **argv) {
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
 	SDL_Window *window = SDL_CreateWindow("osp360", SDL_WINDOWPOS_CENTERED,
 			SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_OPENGL);
 
@@ -171,6 +169,7 @@ int main(int argc, const char **argv) {
 	if (gl3wInit()) {
 		throw std::runtime_error("Failed to init gl3w");
 	}
+	register_debug_callback();
 
 	// Load the model w/ tinyobjloader
 	tinyobj::attrib_t attrib;
@@ -229,19 +228,22 @@ int main(int argc, const char **argv) {
 	ospCommit(renderer);
 	ospRenderFrame(framebuffer, renderer, OSP_FB_COLOR);
 
+	AsyncRenderer async_renderer(renderer, framebuffer);
+
 	// Render one initial frame then kick off the background rendering thread
 	const uint32_t *data = static_cast<const uint32_t*>(ospMapFrameBuffer(framebuffer, OSP_FB_COLOR));
 	GLuint tex;
 	glGenTextures(1, &tex);
+	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, tex);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, PANORAMIC_WIDTH, PANORAMIC_HEIGHT, 0,
 			GL_RGBA, GL_UNSIGNED_BYTE, data);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	ospUnmapFrameBuffer(data, framebuffer);
+	glActiveTexture(GL_TEXTURE0);
 
-	AsyncRenderer async_renderer(renderer, framebuffer);
-
+	glEnable(GL_DEPTH_TEST);
 	glClearColor(0, 0, 0, 1);
 	glClearDepth(1);
 
@@ -258,13 +260,16 @@ int main(int argc, const char **argv) {
 	GLuint shader = load_shader_program(vsrc, fsrc);
 	glUseProgram(shader);
 
-	const glm::mat4 proj = glm::perspective(glm::radians(60.f), 1280.f / 720.f, 0.1f, 10.f);
-	glm::vec3 target_pos(std::cos(cam_phi) * std::sin(cam_theta),
-			std::sin(cam_phi) * std::sin(cam_theta), std::cos(cam_theta));
-	glm::mat4 view = glm::lookAt(glm::vec3(0), target_pos, glm::vec3(0, 0, 1));
-	glm::mat4 proj_view = proj * view;
-	glUniformMatrix4fv(glGetUniformLocation(shader, "proj_view"), 1, GL_FALSE,
-			glm::value_ptr(proj_view));
+	// phi/theta of the camera
+	float cam_phi = 0;
+	float cam_theta = 1.3;
+	glUniform1i(glGetUniformLocation(shader, "envmap"), 1);
+	const GLuint proj_view_unif = glGetUniformLocation(shader, "proj_view");
+
+	// TODO: We need to translate the sponza model so the head is at the middle of it
+	// when we start using the head position for translation?
+
+	OpenVRDisplay vr_display;
 
 	bool quit = false;
 	while (!quit) {
@@ -274,52 +279,34 @@ int main(int argc, const char **argv) {
 				quit = true;
 				break;
 			}
-			if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) {
-				switch (e.key.keysym.sym) {
-					case SDLK_w:
-						key_down[0] = e.type == SDL_KEYDOWN;
-						break;
-					case SDLK_s:
-						key_down[1] = e.type == SDL_KEYDOWN;
-						break;
-					case SDLK_a:
-						key_down[2] = e.type == SDL_KEYDOWN;
-						break;
-					case SDLK_d:
-						key_down[3] = e.type == SDL_KEYDOWN;
-						break;
-					default: break;
-				}
-			}
 		}
-
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		glDrawArrays(GL_TRIANGLE_STRIP, 0, CUBE_STRIP.size() / 3);
-
-		if (key_down[0]) {
-			cam_theta -= 0.01;
-		} else if (key_down[1]) {
-			cam_theta += 0.01;
-		}
-		if (key_down[2]) {
-			cam_phi += 0.01;
-		} else if (key_down[3]) {
-			cam_phi -= 0.01;
-		}
-		target_pos.x = std::cos(cam_phi) * std::sin(cam_theta);
-		target_pos.y = std::sin(cam_phi) * std::sin(cam_theta);
-		target_pos.z = std::cos(cam_theta);
-		view = glm::lookAt(glm::vec3(0), target_pos, glm::vec3(0, 0, 1));
-		proj_view = proj * view;
-		glUniformMatrix4fv(glGetUniformLocation(shader, "proj_view"), 1, GL_FALSE,
-				glm::value_ptr(proj_view));
-
 		if (async_renderer.new_pixels.load()) {
+			glActiveTexture(GL_TEXTURE1);
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, PANORAMIC_WIDTH, PANORAMIC_HEIGHT, 0,
 					GL_RGBA, GL_UNSIGNED_BYTE, async_renderer.map_fb());
 			async_renderer.unmap_fb();
+			glActiveTexture(GL_TEXTURE0);
 		}
 
+		vr_display.begin_frame();
+		for (size_t i = 0; i < 2; ++i) {
+			glm::mat4 proj, view;
+			vr_display.begin_eye(i, view, proj);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+			// Remove translation from the view matrix
+			view[3] = glm::vec4(0, 0, 0, 1);
+			glm::mat4 proj_view = proj * view;
+			glUniformMatrix4fv(proj_view_unif, 1, GL_FALSE, glm::value_ptr(proj_view));
+
+			glDrawArrays(GL_TRIANGLE_STRIP, 0, CUBE_STRIP.size() / 3);
+		}
+		vr_display.submit();
+
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glViewport(0, 0, 1280, 720);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		glDrawArrays(GL_TRIANGLE_STRIP, 0, CUBE_STRIP.size() / 3);
 		SDL_GL_SwapWindow(window);
 	}
 

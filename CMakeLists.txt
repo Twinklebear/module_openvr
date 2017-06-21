@@ -16,7 +16,7 @@ add_definitions(-DGLM_FORCE_RADIANS)
 include_directories(${OSPRAY_INCLUDE_DIRS} ${SDL2_INCLUDE_DIR}
 	${OPENGL_INCLUDE_DIR} ${GLM_INCLUDE_DIRS} ${OPENVR_INCLUDE_DIR}
 	${OSP360_SOURCE_DIR})
-add_executable(osp360 main.cpp gl3w.c)
+add_executable(osp360 main.cpp openvr_display.cpp gldebug.cpp gl3w.c)
 target_link_libraries(osp360 ${OSPRAY_LIBRARIES} ${SDL2_LIBRARY}
 	${OPENVR_LIBRARY} ${OPENGL_LIBRARIES}
 	${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
