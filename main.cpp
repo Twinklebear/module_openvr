@@ -89,7 +89,7 @@ void main(void) {
 )";
 
 
-const int PANORAMIC_HEIGHT = 1024;
+const int PANORAMIC_HEIGHT = 2048;
 const int PANORAMIC_WIDTH = 2 * PANORAMIC_HEIGHT;
 
 struct AsyncRenderer {
