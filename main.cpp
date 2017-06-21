@@ -260,9 +260,6 @@ int main(int argc, const char **argv) {
 	GLuint shader = load_shader_program(vsrc, fsrc);
 	glUseProgram(shader);
 
-	// phi/theta of the camera
-	float cam_phi = 0;
-	float cam_theta = 1.3;
 	glUniform1i(glGetUniformLocation(shader, "envmap"), 1);
 	const GLuint proj_view_unif = glGetUniformLocation(shader, "proj_view");
 
