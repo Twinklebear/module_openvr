@@ -219,11 +219,9 @@ int main(int argc, const char **argv) {
 	ospSetObject(renderer, "camera", camera);
 	ospSetVec3f(renderer, "bgColor", osp::vec3f{1, 1, 1});
 	ospCommit(renderer);
-	ospRenderFrame(framebuffer, renderer, OSP_FB_COLOR);
-
-	AsyncRenderer async_renderer(renderer, framebuffer);
 
 	// Render one initial frame then kick off the background rendering thread
+	ospRenderFrame(framebuffer, renderer, OSP_FB_COLOR);
 	const uint32_t *data = static_cast<const uint32_t*>(ospMapFrameBuffer(framebuffer, OSP_FB_COLOR));
 	GLuint tex;
 	glGenTextures(1, &tex);
@@ -235,6 +233,8 @@ int main(int argc, const char **argv) {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	ospUnmapFrameBuffer(data, framebuffer);
 	glActiveTexture(GL_TEXTURE0);
+
+	AsyncRenderer async_renderer(renderer, framebuffer);
 
 	glEnable(GL_DEPTH_TEST);
 	glClearColor(0, 0, 0, 1);
