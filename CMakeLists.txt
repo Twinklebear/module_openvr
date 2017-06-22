@@ -25,15 +25,29 @@ if (OSPRAY_MODULE_360_VIEWER)
     add_definitions(-DOPENVR_ENABLED)
   endif()
 
-  include_directories(${INCLUDE_DIRS})
+  include_directories(${INCLUDE_DIRS}
+    ${CMAKE_SOURCE_DIR}
+    common/gl3w
+    common/imgui
+    ${CMAKE_SOURCE_DIR}/apps/exampleViewer
+    )
 
   ospray_create_application(osp360
     main.cpp
     openvr_display.cpp
     gldebug.cpp
     gl3w.c
-  LINK
+    LINK
     ospray
-    ${LIBS})
+    ${LIBS}
+    glfw
+    gl3w
+    imgui
+    ospray
+    ospray_common
+    ospray_commandline
+    ospray_imgui3d_sg
+    ospray_sg
+    )
 endif()
 

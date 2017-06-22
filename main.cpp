@@ -21,6 +21,7 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include <sstream>
 
 #include <glm/glm.hpp>
 #include <glm/ext.hpp>
@@ -29,6 +30,17 @@
 #include <SDL.h>
 #include <ospray/ospray.h>
 
+// sg stuff
+#include "common/sg/SceneGraph.h"
+#include "common/sg/Renderer.h"
+#include "common/sg/importer/Importer.h"
+#include "sg/common/FrameBuffer.h"
+#include "ospcommon/FileName.h"
+#include "ospcommon/networking/Socket.h"
+#include "ospcommon/vec.h"
+#include "sg/geometry/TriangleMesh.h"
+#include "widgets/imguiViewerSg.h"
+
 // TODO: Just using this for temporary model loading,
 // ideally we'd use OSPRay's app loaders if we can?
 #define TINYOBJLOADER_IMPLEMENTATION
@@ -36,6 +48,10 @@
 
 #include "openvr_display.h"
 #include "gldebug.h"
+
+
+using namespace ospcommon;
+using namespace ospray;
 
 static const std::array<float, 42> CUBE_STRIP = {
 	1, 1, -1,
@@ -84,6 +100,155 @@ void main(void) {
 )";
 
 
+//
+// sg stuff
+//
+std::vector<std::string> files;
+std::string initialRendererType;
+bool addPlane = true;
+bool debug = false;
+bool fullscreen = false;
+bool print = false;
+
+void parseCommandLine(int ac, const char **&av)
+{
+  for (int i = 1; i < ac; i++) {
+    const std::string arg = av[i];
+    if (arg == "-np" || arg == "--no-plane") {
+      addPlane = false;
+    } else if (arg == "-d" || arg == "--debug") {
+      debug = true;
+    } else if (arg == "-r" || arg == "--renderer") {
+      initialRendererType = av[++i];
+    } else if (arg == "-m" || arg == "--module") {
+      ospLoadModule(av[++i]);
+    } else if (arg == "--print") {
+      print=true;
+    } else if (arg == "--fullscreen") {
+      fullscreen = true;
+    } else if (arg[0] != '-') {
+      files.push_back(av[i]);
+    }
+  }
+}
+
+//parse command line arguments containing the format:
+//  -nodeName:...:nodeName=value,value,value
+void parseCommandLineSG(int ac, const char **&av, sg::Node &root)
+{
+  for(int i=1;i < ac; i++) {
+    std::string arg(av[i]);
+    size_t f;
+    std::string value("");
+    if (arg.size() < 2 || arg[0] != '-')
+      continue;
+
+    while ((f = arg.find(":")) != std::string::npos ||
+           (f = arg.find(",")) != std::string::npos) {
+      arg[f] = ' ';
+    }
+
+    f = arg.find("=");
+    if (f != std::string::npos)
+      value = arg.substr(f+1,arg.size());
+
+    if (value != "") {
+      std::stringstream ss;
+      ss << arg.substr(1,f-1);
+      std::string child;
+      std::reference_wrapper<sg::Node> node_ref = root;
+      while (ss >> child) {
+        node_ref = node_ref.get().childRecursive(child);
+      }
+      auto &node = node_ref.get();
+      //Carson: TODO: reimplement with a way of determining type of node value
+      //  currently relies on exception on value cast
+      try {
+        node.valueAs<std::string>();
+        node.setValue(value);
+      } catch(...) {};
+      try {
+        std::stringstream vals(value);
+        float x;
+        vals >> x;
+        node.valueAs<float>();
+        node.setValue(x);
+      } catch(...) {}
+      try {
+        std::stringstream vals(value);
+        int x;
+        vals >> x;
+        node.valueAs<int>();
+        node.setValue(x);
+      } catch(...) {}
+      try {
+        std::stringstream vals(value);
+        bool x;
+        vals >> x;
+        node.valueAs<bool>();
+        node.setValue(x);
+      } catch(...) {}
+      try {
+        std::stringstream vals(value);
+        float x,y,z;
+        vals >> x >> y >> z;
+        node.valueAs<ospcommon::vec3f>();
+        node.setValue(ospcommon::vec3f(x,y,z));
+      } catch(...) {}
+      try {
+        std::stringstream vals(value);
+        int x,y;
+        vals >> x >> y;
+        node.valueAs<ospcommon::vec2i>();
+        node.setValue(ospcommon::vec2i(x,y));
+      } catch(...) {}
+    }
+  }
+}
+
+void addPlaneToScene(sg::Node& world)
+{
+  auto bbox = world.bounds();
+  if (bbox.empty()) {
+    bbox.lower = vec3f(-5,0,-5);
+    bbox.upper = vec3f(5,10,5);
+  }
+
+  osp::vec3f *vertices = new osp::vec3f[4];
+  float ps = bbox.upper.x*3.f;
+  float py = bbox.lower.z-.1f;
+
+  py = bbox.lower.y+0.01f;
+  vertices[0] = osp::vec3f{-ps, py, -ps};
+  vertices[1] = osp::vec3f{-ps, py, ps};
+  vertices[2] = osp::vec3f{ps, py, -ps};
+  vertices[3] = osp::vec3f{ps, py, ps};
+  auto position = std::make_shared<sg::DataArray3f>((vec3f*)&vertices[0],
+                                                    size_t(4),
+                                                    false);
+  osp::vec3i *triangles = new osp::vec3i[2];
+  triangles[0] = osp::vec3i{0,1,2};
+  triangles[1] = osp::vec3i{1,2,3};
+  auto index = std::make_shared<sg::DataArray3i>((vec3i*)&triangles[0],
+                                                 size_t(2),
+                                                 false);
+  auto &plane = world.createChild("plane", "Instance");
+  auto &mesh  = plane.child("model").createChild("mesh", "TriangleMesh");
+
+  std::shared_ptr<sg::TriangleMesh> sg_plane =
+    std::static_pointer_cast<sg::TriangleMesh>(mesh.shared_from_this());
+  sg_plane->vertex = position;
+  sg_plane->index = index;
+  auto &planeMaterial = mesh["material"];
+  planeMaterial["Kd"].setValue(vec3f(0.5f));
+  planeMaterial["Ks"].setValue(vec3f(0.6f));
+  planeMaterial["Ns"].setValue(2.f);
+}
+//
+// end sg stuff
+//
+
+
 const int PANORAMIC_HEIGHT = 2048;
 const int PANORAMIC_WIDTH = 2 * PANORAMIC_HEIGHT;
 
@@ -96,19 +261,23 @@ struct AsyncRenderer {
 	~AsyncRenderer();
 	const uint32_t* map_fb();
 	void unmap_fb();
+  virtual void start()
+  {
+    render_thread = std::thread([&](){ run(); });
+  }
 
-private:
+protected:
 	std::mutex pixel_lock;
 	std::vector<uint32_t> pixels;
 	std::thread render_thread;
 
-	void run();
+  virtual void run();
 };
+
 AsyncRenderer::AsyncRenderer(OSPRenderer ren, OSPFrameBuffer fb)
 	: renderer(ren), fb(fb), should_quit(false), new_pixels(false),
 	pixels(PANORAMIC_WIDTH * PANORAMIC_HEIGHT, 0)
 {
-	render_thread = std::thread([&](){ run(); });
 }
 AsyncRenderer::~AsyncRenderer() {
 	should_quit.store(true);
@@ -133,6 +302,58 @@ void AsyncRenderer::run() {
 		ospUnmapFrameBuffer(data, fb);
 	}
 }
+
+struct AsyncRendererSg : public AsyncRenderer
+{
+  AsyncRendererSg(const std::shared_ptr<sg::Node> sgRenderer)
+    : sgRenderer(sgRenderer), AsyncRenderer(nullptr,nullptr)
+  {
+  }
+
+  virtual void run() {
+    while (!should_quit.load()) {
+      //      ospRenderFrame(fb, renderer, OSP_FB_COLOR);
+      auto &sgFB = sgRenderer->child("frameBuffer");
+      auto sgFBptr =
+          std::static_pointer_cast<sg::FrameBuffer>(sgFB.shared_from_this());
+
+      static bool once = false;  //TODO: initial commit as timestamp can not
+      // be set to 0
+      //      if (sgFB.children527
+      //      Modified() > lastFTime || !once) {
+      //        auto &size = sgFB["size"];
+      //        nPixels = size.valueAs<vec2i>().x * size.valueAs<vec2i>().y;
+      //        pixelBuffer[0].resize(nPixels);
+      //        pixelBuffer[1].resize(nPixels);
+      //      }
+      if (sgRenderer->childrenLastModified() > lastRTime || !once) {
+        sgRenderer->traverse("verify");
+        sgRenderer->traverse("commit");
+      }
+      once = true;
+      lastRTime = sg::TimeStamp();
+      sgRenderer->traverse("render");
+
+      //      const uint32_t *data = static_cast<const uint32_t*>(ospMapFrameBuffer(fb, OSP_FB_COLOR));
+      auto *data = (uint32_t*)sgFBptr->map();
+      std::lock_guard<std::mutex> lock(pixel_lock);
+      std::memcpy(pixels.data(), data, sizeof(uint32_t) * PANORAMIC_WIDTH * PANORAMIC_HEIGHT);
+      new_pixels.store(true);
+      sgFBptr->unmap(data);
+//      ospUnmapFrameBuffer(data, fb);
+    }
+  }
+  virtual void start()
+  {
+    render_thread = std::thread([&](){ run(); });
+  }
+
+
+
+protected:
+  const std::shared_ptr<sg::Node> sgRenderer;
+  sg::TimeStamp  lastRTime;
+};
 
 GLuint load_shader_program(const std::string &vshader_src, const std::string &fshader_src);
 
@@ -165,6 +386,115 @@ int main(int argc, const char **argv) {
 	}
 	register_debug_callback();
 
+  // scene graph stuff
+
+  parseCommandLine(argc, argv);
+  auto renderer_ptr = sg::createNode("renderer", "Renderer");
+  auto &renderer = *renderer_ptr;
+  /*! the renderer we use for rendering on the display wall; null if
+        no dw available */
+//  std::shared_ptr<sg::Node> rendererDW;
+  /*! display wall service info - ignore if 'rendererDW' is null */
+  //    dw::ServiceInfo dwService;
+
+  //    const char *dwNodeName = getenv("DISPLAY_WALL");
+  //    if (dwNodeName) {
+  //      std::cout << "#######################################################"
+  //                << std::endl;
+  //      std::cout << "found a DISPLAY_WALL environment variable ...." << std::endl;
+  //      std::cout << "trying to connect to display wall service on "
+  //                << dwNodeName << ":2903" << std::endl;
+
+  //      dwService.getFrom(dwNodeName,2903);
+  //      std::cout << "found display wall service on MPI port "
+  //                << dwService.mpiPortName << std::endl;
+  //      std::cout << "#######################################################"
+  //                << std::endl;
+  //      rendererDW = sg::createNode("renderer", "Renderer");
+  //    }
+
+  renderer["shadowsEnabled"].setValue(true);
+  renderer["aoSamples"].setValue(1);
+  renderer.setChild("camera", sg::createNode("camera", "PanoramicCamera"));
+  renderer["camera"].setParent(renderer);
+//  renderer["camera"]["fovy"].setValue(60.f);
+  renderer["camera"]["pos"].setValue(ospcommon::vec3f{21, 242, -49});
+  renderer["camera"]["dir"].setValue(ospcommon::vec3f{0, 0, 1});
+  renderer["camera"]["up"].setValue(ospcommon::vec3f{0, -1, 0});
+//  auto eye = ospcommon::vec3f{463, 149, 5.4};
+//  auto at = ospcommon::vec3f{-17, 110, -18};
+//  auto dir = at - eye;
+//  dir = normalize(dir);
+//    renderer["camera"]["pos"].setValue(eye);
+//    renderer["camera"]["dir"].setValue(dir);
+//    renderer["camera"]["up"].setValue(ospcommon::vec3f{0, 1, 0});
+
+
+  renderer["frameBuffer"]["size"].setValue(ospcommon::vec2i(PANORAMIC_WIDTH, PANORAMIC_HEIGHT));
+
+  //    if (rendererDW.get()) {
+  //      rendererDW->child("shadowsEnabled").setValue(true);
+  //      rendererDW->child("aoSamples").setValue(1);
+  //      rendererDW->child("camera")["fovy"].setValue(60.f);
+  //    }
+
+  if (!initialRendererType.empty()) {
+    renderer["rendererType"].setValue(initialRendererType);
+    //      if (rendererDW.get()) {
+    //        rendererDW->child("rendererType").setValue(initialRendererType);
+    //      }
+  }
+
+  auto &lights = renderer["lights"];
+
+  auto &sun = lights.createChild("sun", "DirectionalLight");
+  sun["color"].setValue(vec3f(1.f,232.f/255.f,166.f/255.f));
+  sun["direction"].setValue(vec3f(0.462f,-1.f,-.1f));
+  sun["intensity"].setValue(2.5f);
+
+  auto &bounce = lights.createChild("bounce", "DirectionalLight");
+  bounce["color"].setValue(vec3f(127.f/255.f,178.f/255.f,255.f/255.f));
+  bounce["direction"].setValue(vec3f(-.93,-.54f,-.605f));
+  bounce["intensity"].setValue(1.25f);
+
+  auto &ambient = lights.createChild("ambient", "AmbientLight");
+  ambient["intensity"].setValue(3.9f);
+  ambient["color"].setValue(vec3f(174.f/255.f,218.f/255.f,255.f/255.f));
+
+  auto &world = renderer["world"];
+
+  for (auto file : files) {
+    FileName fn = file;
+    auto importerNode_ptr = sg::createNode(fn.name(), "Importer");
+    auto &importerNode = *importerNode_ptr;
+    importerNode["fileName"].setValue(fn.str());
+    world += importerNode_ptr;
+  }
+
+  parseCommandLineSG(argc, argv, renderer);
+
+  //    if (rendererDW.get()) {
+  //      rendererDW->setChild("world",  renderer["world"].shared_from_this());
+  //      rendererDW->setChild("lights", renderer["lights"].shared_from_this());
+
+  //      auto &frameBuffer = rendererDW->child("frameBuffer");
+  //      frameBuffer["size"].setValue(dwService.totalPixelsInWall);
+  //      frameBuffer["displayWall"].setValue(dwService.mpiPortName);
+  //    }
+
+  if (print || debug)
+    renderer.traverse("print");
+
+  renderer.traverse("verify");
+  renderer.traverse("commit");
+  renderer.traverse("render");
+
+  std::cout << "sg init finished" << std::endl;
+
+  //
+  // end sg init
+  //
+
 	// Load the model w/ tinyobjloader
 	tinyobj::attrib_t attrib;
 	std::vector<tinyobj::shape_t> shapes;
@@ -179,50 +509,53 @@ int main(int argc, const char **argv) {
 		return 1;
 	}
 
-	OSPModel world = ospNewModel();
+//	OSPModel world = ospNewModel();
 	// Load all the objects into ospray
-	OSPData pos_data = ospNewData(attrib.vertices.size() / 3, OSP_FLOAT3,
-			attrib.vertices.data(), OSP_DATA_SHARED_BUFFER);
-	ospCommit(pos_data);
-	for (size_t s = 0; s < shapes.size(); ++s) {
-		std::cout << "Loading mesh " << shapes[s].name
-			<< ", has " << shapes[s].mesh.indices.size() << " vertices\n";
-		const tinyobj::mesh_t &mesh = shapes[s].mesh;
-		std::vector<int32_t> indices;
-		indices.reserve(mesh.indices.size());
-		for (const auto &idx : mesh.indices) {
-			indices.push_back(idx.vertex_index);
-		}
-		OSPData idx_data = ospNewData(indices.size() / 3, OSP_INT3, indices.data());
-		ospCommit(idx_data);
-		OSPGeometry geom = ospNewGeometry("triangles");
-		ospSetObject(geom, "vertex", pos_data);
-		ospSetObject(geom, "index", idx_data);
-		ospCommit(geom);
-		ospAddGeometry(world, geom);
-	}
-	ospCommit(world);
+//	OSPData pos_data = ospNewData(attrib.vertices.size() / 3, OSP_FLOAT3,
+//			attrib.vertices.data(), OSP_DATA_SHARED_BUFFER);
+//	ospCommit(pos_data);
+//	for (size_t s = 0; s < shapes.size(); ++s) {
+//		std::cout << "Loading mesh " << shapes[s].name
+//			<< ", has " << shapes[s].mesh.indices.size() << " vertices\n";
+//		const tinyobj::mesh_t &mesh = shapes[s].mesh;
+//		std::vector<int32_t> indices;
+//		indices.reserve(mesh.indices.size());
+//		for (const auto &idx : mesh.indices) {
+//			indices.push_back(idx.vertex_index);
+//		}
+//		OSPData idx_data = ospNewData(indices.size() / 3, OSP_INT3, indices.data());
+//		ospCommit(idx_data);
+//		OSPGeometry geom = ospNewGeometry("triangles");
+//		ospSetObject(geom, "vertex", pos_data);
+//		ospSetObject(geom, "index", idx_data);
+//		ospCommit(geom);
+//		ospAddGeometry(world, geom);
+//	}
+//	ospCommit(world);
 
-	OSPFrameBuffer framebuffer = ospNewFrameBuffer(osp::vec2i{PANORAMIC_WIDTH, PANORAMIC_HEIGHT},
-			OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
-	ospFrameBufferClear(framebuffer, OSP_FB_COLOR);
+//	OSPFrameBuffer framebuffer = ospNewFrameBuffer(osp::vec2i{PANORAMIC_WIDTH, PANORAMIC_HEIGHT},
+//			OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
+//	ospFrameBufferClear(framebuffer, OSP_FB_COLOR);
 
-	OSPCamera camera = ospNewCamera("panoramic");
-	// TODO: this is hard-coded for sponza
-	ospSetVec3f(camera, "pos", osp::vec3f{21, 242, -49});
-	ospSetVec3f(camera, "dir", osp::vec3f{0, 0, 1});
-	ospSetVec3f(camera, "up", osp::vec3f{0, -1, 0});
-	ospCommit(camera);
+//	OSPCamera camera = ospNewCamera("panoramic");
+//	// TODO: this is hard-coded for sponza
+//	ospSetVec3f(camera, "pos", osp::vec3f{21, 242, -49});
+//	ospSetVec3f(camera, "dir", osp::vec3f{0, 0, 1});
+//	ospSetVec3f(camera, "up", osp::vec3f{0, -1, 0});
+//	ospCommit(camera);
 
-	OSPRenderer renderer = ospNewRenderer("ao8");
-	ospSetObject(renderer, "model", world);
-	ospSetObject(renderer, "camera", camera);
-	ospSetVec3f(renderer, "bgColor", osp::vec3f{1, 1, 1});
-	ospCommit(renderer);
+//	OSPRenderer renderer = ospNewRenderer("ao8");
+//	ospSetObject(renderer, "model", world);
+//	ospSetObject(renderer, "camera", camera);
+//	ospSetVec3f(renderer, "bgColor", osp::vec3f{1, 1, 1});
+//	ospCommit(renderer);
 
-	// Render one initial frame then kick off the background rendering thread
-	ospRenderFrame(framebuffer, renderer, OSP_FB_COLOR);
-	const uint32_t *data = static_cast<const uint32_t*>(ospMapFrameBuffer(framebuffer, OSP_FB_COLOR));
+//	// Render one initial frame then kick off the background rendering thread
+//	ospRenderFrame(framebuffer, renderer, OSP_FB_COLOR);
+//	const uint32_t *data = static_cast<const uint32_t*>(ospMapFrameBuffer(framebuffer, OSP_FB_COLOR));
+  auto sgFBptr =
+      std::static_pointer_cast<sg::FrameBuffer>(renderer["frameBuffer"].shared_from_this());
+  const uint32_t *data = (uint32_t*)sgFBptr->map();
 	GLuint tex;
 	glGenTextures(1, &tex);
 	glActiveTexture(GL_TEXTURE1);
@@ -231,10 +564,14 @@ int main(int argc, const char **argv) {
 			GL_RGBA, GL_UNSIGNED_BYTE, data);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	ospUnmapFrameBuffer(data, framebuffer);
+  sgFBptr->unmap(data);
 	glActiveTexture(GL_TEXTURE0);
 
-	AsyncRenderer async_renderer(renderer, framebuffer);
+//	AsyncRenderer async_renderer(renderer, framebuffer);
+  std::cout << "starting async renderer" << std::endl;
+  AsyncRendererSg async_renderer(renderer_ptr);
+  async_renderer.start();
+  std::cout << "done starting async renderer" << std::endl;
 
 	glEnable(GL_DEPTH_TEST);
 	glClearColor(0, 0, 0, 1);
