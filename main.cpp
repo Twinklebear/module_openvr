@@ -34,6 +34,7 @@
 #include "common/sg/SceneGraph.h"
 #include "common/sg/Renderer.h"
 #include "common/sg/importer/Importer.h"
+#include "sg/common/TimeStamp.h"
 #include "sg/common/FrameBuffer.h"
 #include "ospcommon/FileName.h"
 #include "ospcommon/networking/Socket.h"
@@ -415,12 +416,21 @@ int main(int argc, const char **argv) {
 
   renderer["shadowsEnabled"].setValue(true);
   renderer["aoSamples"].setValue(1);
-  renderer.setChild("camera", sg::createNode("camera", "PanoramicCamera"));
-  renderer["camera"].setParent(renderer);
+  renderer["aoDistance"].setValue(500.f);
+  renderer["autoEpsilon"].setValue(false);
+  auto panoramicCamera = sg::createNode("camera", "PanoramicCamera");
+  auto perspectiveCamera = renderer["camera"].shared_from_this();
+  renderer.setChild("camera", panoramicCamera);
+  panoramicCamera->setParent(renderer);
 //  renderer["camera"]["fovy"].setValue(60.f);
-  renderer["camera"]["pos"].setValue(ospcommon::vec3f{21, 242, -49});
-  renderer["camera"]["dir"].setValue(ospcommon::vec3f{0, 0, 1});
-  renderer["camera"]["up"].setValue(ospcommon::vec3f{0, -1, 0});
+  panoramicCamera->child("pos").setValue(ospcommon::vec3f{21, 242, -49});
+  panoramicCamera->child("dir").setValue(ospcommon::vec3f{0, 0, 1});
+  panoramicCamera->child("up").setValue(ospcommon::vec3f{0, -1, 0});
+  perspectiveCamera->child("pos").setValue(ospcommon::vec3f{21, 242, -49});
+  perspectiveCamera->child("dir").setValue(ospcommon::vec3f{0, 0, 1});
+  perspectiveCamera->child("up").setValue(ospcommon::vec3f{0, -1, 0});
+
+  renderer["spp"].setValue(-2);
 //  auto eye = ospcommon::vec3f{463, 149, 5.4};
 //  auto at = ospcommon::vec3f{-17, 110, -18};
 //  auto dir = at - eye;
@@ -602,20 +612,58 @@ int main(int argc, const char **argv) {
 #endif
 
 	bool quit = false;
+  bool interactiveCamera = false;
+  sg::TimeStamp lastRenderTime;
+  sg::TimeStamp lastUpdateTime;
 	while (!quit) {
 		SDL_Event e;
+    bool moved = false;
 		while (SDL_PollEvent(&e)) {
 			if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)){
 				quit = true;
 				break;
 			}
+      else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_UP){
+        float stepsize = 5.f;
+        renderer.setChild("camera", perspectiveCamera);
+        auto eye = renderer["camera"]["pos"].valueAs<ospcommon::vec3f>();
+        auto dir = renderer["camera"]["dir"].valueAs<ospcommon::vec3f>();
+        eye += dir*stepsize;
+        renderer["camera"]["pos"].setValue(eye);
+        panoramicCamera->child("pos").setValue(eye);
+        moved = true;
+        interactiveCamera = true;
+        lastUpdateTime = sg::TimeStamp();
+        break;
+      }
+      else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_DOWN){
+        float stepsize = -5.f;
+        renderer.setChild("camera", perspectiveCamera);
+        auto eye = renderer["camera"]["pos"].valueAs<ospcommon::vec3f>();
+        auto dir = renderer["camera"]["dir"].valueAs<ospcommon::vec3f>();
+        eye += dir*stepsize;
+        renderer["camera"]["pos"].setValue(eye);
+        panoramicCamera->child("pos").setValue(eye);
+        interactiveCamera = true;
+        moved = true;
+        lastUpdateTime = sg::TimeStamp();
+        break;
+      }
 		}
+    if (!moved && interactiveCamera && lastRenderTime > (lastUpdateTime+5))
+    {
+      renderer.setChild("camera", panoramicCamera);
+      panoramicCamera->markAsModified();
+      panoramicCamera->setChildrenModified(sg::TimeStamp());
+      interactiveCamera = false;
+    }
 		if (async_renderer.new_pixels.load()) {
 			glActiveTexture(GL_TEXTURE1);
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, PANORAMIC_WIDTH, PANORAMIC_HEIGHT, 0,
 					GL_RGBA, GL_UNSIGNED_BYTE, async_renderer.map_fb());
 			async_renderer.unmap_fb();
 			glActiveTexture(GL_TEXTURE0);
+      lastRenderTime = sg::TimeStamp();
 		}
 
 #ifdef OPENVR_ENABLED
