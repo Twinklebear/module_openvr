@@ -613,8 +613,10 @@ int main(int argc, const char **argv) {
 
 	bool quit = false;
   bool interactiveCamera = false;
+  bool interacting = false;
   sg::TimeStamp lastRenderTime;
   sg::TimeStamp lastUpdateTime;
+  float stepsize = 2.f;
 	while (!quit) {
 		SDL_Event e;
     bool moved = false;
@@ -624,33 +626,35 @@ int main(int argc, const char **argv) {
 				break;
 			}
       else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_UP){
-        float stepsize = 5.f;
         renderer.setChild("camera", perspectiveCamera);
-        auto eye = renderer["camera"]["pos"].valueAs<ospcommon::vec3f>();
-        auto dir = renderer["camera"]["dir"].valueAs<ospcommon::vec3f>();
+        auto eye = perspectiveCamera->child("pos").valueAs<ospcommon::vec3f>();
+        auto dir = perspectiveCamera->child("dir").valueAs<ospcommon::vec3f>();
         eye += dir*stepsize;
         renderer["camera"]["pos"].setValue(eye);
         panoramicCamera->child("pos").setValue(eye);
         moved = true;
         interactiveCamera = true;
         lastUpdateTime = sg::TimeStamp();
+        interacting = true;
         break;
       }
       else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_DOWN){
-        float stepsize = -5.f;
         renderer.setChild("camera", perspectiveCamera);
-        auto eye = renderer["camera"]["pos"].valueAs<ospcommon::vec3f>();
-        auto dir = renderer["camera"]["dir"].valueAs<ospcommon::vec3f>();
-        eye += dir*stepsize;
+        auto eye = perspectiveCamera->child("pos").valueAs<ospcommon::vec3f>();
+        auto dir = perspectiveCamera->child("dir").valueAs<ospcommon::vec3f>();
+        eye -= dir*stepsize;
         renderer["camera"]["pos"].setValue(eye);
         panoramicCamera->child("pos").setValue(eye);
         interactiveCamera = true;
         moved = true;
         lastUpdateTime = sg::TimeStamp();
+        interacting = true;
         break;
       }
+      else if (e.type == SDL_KEYUP)
+        interacting = false;
 		}
-    if (!moved && interactiveCamera && lastRenderTime > (lastUpdateTime+5))
+    if (!moved && interactiveCamera && !interacting)
     {
       renderer.setChild("camera", panoramicCamera);
       panoramicCamera->markAsModified();
