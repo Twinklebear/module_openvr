@@ -212,8 +212,6 @@ int main(int argc, const char **argv) {
 	ospSetVec3f(camera, "pos", osp::vec3f{21, 242, -49});
 	ospSetVec3f(camera, "dir", osp::vec3f{0, 0, 1});
 	ospSetVec3f(camera, "up", osp::vec3f{0, -1, 0});
-	ospSet1f(camera, "fovy", 60.f);
-	ospSet1f(camera, "aspect", 2.f);
 	ospCommit(camera);
 
 	OSPRenderer renderer = ospNewRenderer("ao8");
