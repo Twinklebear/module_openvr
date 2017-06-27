@@ -29,6 +29,7 @@
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #include <ospray/ospray.h>
+#include <ospcommon/library.h>
 
 // sg stuff
 #include "common/sg/SceneGraph.h"
@@ -250,7 +251,7 @@ void addPlaneToScene(sg::Node& world)
 //
 
 
-const int PANORAMIC_HEIGHT = 2048;
+const int PANORAMIC_HEIGHT = 1024;
 const int PANORAMIC_WIDTH = 2 * PANORAMIC_HEIGHT;
 
 struct AsyncRenderer {
@@ -388,6 +389,7 @@ int main(int argc, const char **argv) {
 	register_debug_callback();
 
   // scene graph stuff
+  ospcommon::LibraryRepository::getInstance()->add("ospray_sg");
 
   parseCommandLine(argc, argv);
   auto renderer_ptr = sg::createNode("renderer", "Renderer");
@@ -414,6 +416,7 @@ int main(int argc, const char **argv) {
   //      rendererDW = sg::createNode("renderer", "Renderer");
   //    }
 
+  renderer["maxDepth"].setValue(3);
   renderer["shadowsEnabled"].setValue(true);
   renderer["aoSamples"].setValue(1);
   renderer["aoDistance"].setValue(500.f);
@@ -430,7 +433,7 @@ int main(int argc, const char **argv) {
   perspectiveCamera->child("dir").setValue(ospcommon::vec3f{0, 0, 1});
   perspectiveCamera->child("up").setValue(ospcommon::vec3f{0, -1, 0});
 
-  renderer["spp"].setValue(-2);
+  renderer["spp"].setValue(-1);
 //  auto eye = ospcommon::vec3f{463, 149, 5.4};
 //  auto at = ospcommon::vec3f{-17, 110, -18};
 //  auto dir = at - eye;
@@ -625,7 +628,7 @@ int main(int argc, const char **argv) {
 			}
       else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_UP){
         float stepsize = 5.f;
-        renderer.setChild("camera", perspectiveCamera);
+        //renderer.setChild("camera", perspectiveCamera);
         auto eye = renderer["camera"]["pos"].valueAs<ospcommon::vec3f>();
         auto dir = renderer["camera"]["dir"].valueAs<ospcommon::vec3f>();
         eye += dir*stepsize;
@@ -638,7 +641,7 @@ int main(int argc, const char **argv) {
       }
       else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_DOWN){
         float stepsize = -5.f;
-        renderer.setChild("camera", perspectiveCamera);
+        //renderer.setChild("camera", perspectiveCamera);
         auto eye = renderer["camera"]["pos"].valueAs<ospcommon::vec3f>();
         auto dir = renderer["camera"]["dir"].valueAs<ospcommon::vec3f>();
         eye += dir*stepsize;

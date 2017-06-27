@@ -37,16 +37,12 @@ if (OSPRAY_MODULE_360_VIEWER)
     openvr_display.cpp
     gldebug.cpp
     gl3w.c
-    LINK
+  LINK
     ospray
     ${LIBS}
-    glfw
-    gl3w
-    imgui
     ospray
     ospray_common
     ospray_commandline
-    ospray_imgui3d_sg
     ospray_sg
     )
 endif()
