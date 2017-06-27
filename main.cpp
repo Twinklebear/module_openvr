@@ -320,14 +320,6 @@ struct AsyncRendererSg : public AsyncRenderer
           std::static_pointer_cast<sg::FrameBuffer>(sgFB.shared_from_this());
 
       static bool once = false;  //TODO: initial commit as timestamp can not
-      // be set to 0
-      //      if (sgFB.children527
-      //      Modified() > lastFTime || !once) {
-      //        auto &size = sgFB["size"];
-      //        nPixels = size.valueAs<vec2i>().x * size.valueAs<vec2i>().y;
-      //        pixelBuffer[0].resize(nPixels);
-      //        pixelBuffer[1].resize(nPixels);
-      //      }
       if (sgRenderer->childrenLastModified() > lastRTime || !once) {
         sgRenderer->traverse("verify");
         sgRenderer->traverse("commit");
@@ -336,13 +328,11 @@ struct AsyncRendererSg : public AsyncRenderer
       lastRTime = sg::TimeStamp();
       sgRenderer->traverse("render");
 
-      //      const uint32_t *data = static_cast<const uint32_t*>(ospMapFrameBuffer(fb, OSP_FB_COLOR));
       auto *data = (uint32_t*)sgFBptr->map();
       std::lock_guard<std::mutex> lock(pixel_lock);
       std::memcpy(pixels.data(), data, sizeof(uint32_t) * PANORAMIC_WIDTH * PANORAMIC_HEIGHT);
       new_pixels.store(true);
       sgFBptr->unmap(data);
-//      ospUnmapFrameBuffer(data, fb);
     }
   }
   virtual void start()
@@ -399,27 +389,6 @@ int main(int argc, const char **argv) {
   parseCommandLine(argc, argv);
   auto renderer_ptr = sg::createNode("renderer", "Renderer");
   auto &renderer = *renderer_ptr;
-  /*! the renderer we use for rendering on the display wall; null if
-        no dw available */
-//  std::shared_ptr<sg::Node> rendererDW;
-  /*! display wall service info - ignore if 'rendererDW' is null */
-  //    dw::ServiceInfo dwService;
-
-  //    const char *dwNodeName = getenv("DISPLAY_WALL");
-  //    if (dwNodeName) {
-  //      std::cout << "#######################################################"
-  //                << std::endl;
-  //      std::cout << "found a DISPLAY_WALL environment variable ...." << std::endl;
-  //      std::cout << "trying to connect to display wall service on "
-  //                << dwNodeName << ":2903" << std::endl;
-
-  //      dwService.getFrom(dwNodeName,2903);
-  //      std::cout << "found display wall service on MPI port "
-  //                << dwService.mpiPortName << std::endl;
-  //      std::cout << "#######################################################"
-  //                << std::endl;
-  //      rendererDW = sg::createNode("renderer", "Renderer");
-  //    }
 
   renderer["maxDepth"].setValue(3);
   renderer["shadowsEnabled"].setValue(true);
@@ -430,37 +399,17 @@ int main(int argc, const char **argv) {
   auto perspectiveCamera = renderer["camera"].shared_from_this();
   renderer.setChild("camera", panoramicCamera);
   panoramicCamera->setParent(renderer);
-//  renderer["camera"]["fovy"].setValue(60.f);
   panoramicCamera->child("pos").setValue(ospcommon::vec3f{21, 242, -49});
   panoramicCamera->child("dir").setValue(ospcommon::vec3f{0, 0, 1});
   panoramicCamera->child("up").setValue(ospcommon::vec3f{0, -1, 0});
   perspectiveCamera->child("pos").setValue(ospcommon::vec3f{21, 242, -49});
   perspectiveCamera->child("dir").setValue(ospcommon::vec3f{0, 0, 1});
   perspectiveCamera->child("up").setValue(ospcommon::vec3f{0, -1, 0});
-
   renderer["spp"].setValue(-1);
-//  auto eye = ospcommon::vec3f{463, 149, 5.4};
-//  auto at = ospcommon::vec3f{-17, 110, -18};
-//  auto dir = at - eye;
-//  dir = normalize(dir);
-//    renderer["camera"]["pos"].setValue(eye);
-//    renderer["camera"]["dir"].setValue(dir);
-//    renderer["camera"]["up"].setValue(ospcommon::vec3f{0, 1, 0});
-
 
   renderer["frameBuffer"]["size"].setValue(ospcommon::vec2i(PANORAMIC_WIDTH, PANORAMIC_HEIGHT));
-
-  //    if (rendererDW.get()) {
-  //      rendererDW->child("shadowsEnabled").setValue(true);
-  //      rendererDW->child("aoSamples").setValue(1);
-  //      rendererDW->child("camera")["fovy"].setValue(60.f);
-  //    }
-
   if (!initialRendererType.empty()) {
     renderer["rendererType"].setValue(initialRendererType);
-    //      if (rendererDW.get()) {
-    //        rendererDW->child("rendererType").setValue(initialRendererType);
-    //      }
   }
 
   auto &lights = renderer["lights"];
@@ -490,22 +439,11 @@ int main(int argc, const char **argv) {
   }
 
   parseCommandLineSG(argc, argv, renderer);
-
-  //    if (rendererDW.get()) {
-  //      rendererDW->setChild("world",  renderer["world"].shared_from_this());
-  //      rendererDW->setChild("lights", renderer["lights"].shared_from_this());
-
-  //      auto &frameBuffer = rendererDW->child("frameBuffer");
-  //      frameBuffer["size"].setValue(dwService.totalPixelsInWall);
-  //      frameBuffer["displayWall"].setValue(dwService.mpiPortName);
-  //    }
-
   if (print || debug)
     renderer.traverse("print");
 
   renderer.traverse("verify");
   renderer.traverse("commit");
-  renderer.traverse("render");
 
   std::cout << "sg init finished" << std::endl;
 
@@ -527,50 +465,8 @@ int main(int argc, const char **argv) {
 		return 1;
 	}
 
-//	OSPModel world = ospNewModel();
-	// Load all the objects into ospray
-//	OSPData pos_data = ospNewData(attrib.vertices.size() / 3, OSP_FLOAT3,
-//			attrib.vertices.data(), OSP_DATA_SHARED_BUFFER);
-//	ospCommit(pos_data);
-//	for (size_t s = 0; s < shapes.size(); ++s) {
-//		std::cout << "Loading mesh " << shapes[s].name
-//			<< ", has " << shapes[s].mesh.indices.size() << " vertices\n";
-//		const tinyobj::mesh_t &mesh = shapes[s].mesh;
-//		std::vector<int32_t> indices;
-//		indices.reserve(mesh.indices.size());
-//		for (const auto &idx : mesh.indices) {
-//			indices.push_back(idx.vertex_index);
-//		}
-//		OSPData idx_data = ospNewData(indices.size() / 3, OSP_INT3, indices.data());
-//		ospCommit(idx_data);
-//		OSPGeometry geom = ospNewGeometry("triangles");
-//		ospSetObject(geom, "vertex", pos_data);
-//		ospSetObject(geom, "index", idx_data);
-//		ospCommit(geom);
-//		ospAddGeometry(world, geom);
-//	}
-//	ospCommit(world);
-
-//	OSPFrameBuffer framebuffer = ospNewFrameBuffer(osp::vec2i{PANORAMIC_WIDTH, PANORAMIC_HEIGHT},
-//			OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
-//	ospFrameBufferClear(framebuffer, OSP_FB_COLOR);
-
-//	OSPCamera camera = ospNewCamera("panoramic");
-//	// TODO: this is hard-coded for sponza
-//	ospSetVec3f(camera, "pos", osp::vec3f{21, 242, -49});
-//	ospSetVec3f(camera, "dir", osp::vec3f{0, 0, 1});
-//	ospSetVec3f(camera, "up", osp::vec3f{0, -1, 0});
-//	ospCommit(camera);
-
-//	OSPRenderer renderer = ospNewRenderer("ao8");
-//	ospSetObject(renderer, "model", world);
-//	ospSetObject(renderer, "camera", camera);
-//	ospSetVec3f(renderer, "bgColor", osp::vec3f{1, 1, 1});
-//	ospCommit(renderer);
-
-//	// Render one initial frame then kick off the background rendering thread
-//	ospRenderFrame(framebuffer, renderer, OSP_FB_COLOR);
-//	const uint32_t *data = static_cast<const uint32_t*>(ospMapFrameBuffer(framebuffer, OSP_FB_COLOR));
+  // Render one initial frame then kick off the background rendering thread
+  renderer.traverse("render");
   auto sgFBptr =
       std::static_pointer_cast<sg::FrameBuffer>(renderer["frameBuffer"].shared_from_this());
   const uint32_t *data = (uint32_t*)sgFBptr->map();
@@ -585,11 +481,9 @@ int main(int argc, const char **argv) {
   sgFBptr->unmap(data);
 	glActiveTexture(GL_TEXTURE0);
 
-//	AsyncRenderer async_renderer(renderer, framebuffer);
   std::cout << "starting async renderer" << std::endl;
   AsyncRendererSg async_renderer(renderer_ptr);
   async_renderer.start();
-  std::cout << "done starting async renderer" << std::endl;
 
 	glEnable(GL_DEPTH_TEST);
 	glClearColor(0, 0, 0, 1);
@@ -659,8 +553,9 @@ int main(int argc, const char **argv) {
         interacting = true;
         break;
       }
-      else if (e.type == SDL_KEYUP)
+      else if (e.type == SDL_KEYUP) {
         interacting = false;
+      }
 		}
     if (!moved && interactiveCamera && !interacting)
     {
