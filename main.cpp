@@ -386,7 +386,12 @@ int main(int argc, const char **argv) {
 	if (gl3wInit()) {
 		throw std::runtime_error("Failed to init gl3w");
 	}
-	register_debug_callback();
+  for (int i = 0; i < argc; ++i) {
+    if (std::strcmp(argv[i], "-gldebug") == 0) {
+      register_debug_callback();
+      break;
+    }
+  }
 
   // scene graph stuff
   ospcommon::LibraryRepository::getInstance()->add("ospray_sg");
