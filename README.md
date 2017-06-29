@@ -12,3 +12,7 @@ cmake <other OSPRay params> \
 	-DGLM_DIR=<..> -DSDL2_DIR=<..> -DOPENVR_DIR=<..>
 ```
 
+If you don't have the OpenVR SDK on your system or don't specify
+`OPENVR_DIR` the app will build to just show the desktop mirror view
+with a fixed viewpoint.
+
