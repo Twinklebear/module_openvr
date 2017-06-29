@@ -66,6 +66,9 @@ static const std::array<float, 42> CUBE_STRIP = {
   -1, -1, -1
 };
 
+const int MIRROR_WIDTH = 720;
+const int MIRROR_HEIGHT = 800;
+
 const static std::string vsrc = R"(
 #version 330 core
 layout(location = 0) in vec3 pos;
@@ -317,7 +320,7 @@ int main(int argc, const char **argv) {
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
   SDL_Window *window = SDL_CreateWindow("osp360", SDL_WINDOWPOS_CENTERED,
-      SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_OPENGL);
+      SDL_WINDOWPOS_CENTERED, MIRROR_WIDTH, MIRROR_HEIGHT, SDL_WINDOW_OPENGL);
 
   if (!window) {
     return 1;
@@ -446,7 +449,8 @@ int main(int argc, const char **argv) {
 #ifdef OPENVR_ENABLED
   OpenVRDisplay vr_display;
 #else
-  const glm::mat4 proj_view = glm::perspective(glm::radians(65.f), 1280.f / 720.f, 0.01f, 10.f)
+  const glm::mat4 proj_view = glm::perspective(glm::radians(65.f),
+		  static_cast<float>(MIRROR_WIDTH) / MIRROR_HEIGHT, 0.01f, 10.f)
     * glm::lookAt(glm::vec3(0), glm::vec3(1, 0, 0), glm::vec3(0, 1, 0));
   glUniformMatrix4fv(proj_view_unif, 1, GL_FALSE, glm::value_ptr(proj_view));
 #endif
@@ -529,7 +533,7 @@ int main(int argc, const char **argv) {
 #endif
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(0, 0, 1280, 720);
+    glViewport(0, 0, MIRROR_WIDTH, MIRROR_HEIGHT);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, CUBE_STRIP.size() / 3);
     SDL_GL_SwapWindow(window);
