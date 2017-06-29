@@ -43,33 +43,27 @@
 #include "sg/geometry/TriangleMesh.h"
 #include "widgets/imguiViewerSg.h"
 
-// TODO: Just using this for temporary model loading,
-// ideally we'd use OSPRay's app loaders if we can?
-#define TINYOBJLOADER_IMPLEMENTATION
-#include "tiny_obj_loader.h"
-
 #include "openvr_display.h"
 #include "gldebug.h"
-
 
 using namespace ospcommon;
 using namespace ospray;
 
 static const std::array<float, 42> CUBE_STRIP = {
-	1, 1, -1,
-	-1, 1, -1,
-	1, 1, 1,
-	-1, 1, 1,
-	-1, -1, 1,
-	-1, 1, -1,
-	-1, -1, -1,
-	1, 1, -1,
-	1, -1, -1,
-	1, 1, 1,
-	1, -1, 1,
-	-1, -1, 1,
-	1, -1, -1,
-	-1, -1, -1
+  1, 1, -1,
+  -1, 1, -1,
+  1, 1, 1,
+  -1, 1, 1,
+  -1, -1, 1,
+  -1, 1, -1,
+  -1, -1, -1,
+  1, 1, -1,
+  1, -1, -1,
+  1, 1, 1,
+  1, -1, 1,
+  -1, -1, 1,
+  1, -1, -1,
+  -1, -1, -1
 };
 
 const static std::string vsrc = R"(
@@ -78,8 +72,8 @@ layout(location = 0) in vec3 pos;
 uniform mat4 proj_view;
 out vec3 vdir;
 void main(void) {
-	gl_Position = proj_view * vec4(pos, 1);
-	vdir = pos.xyz;
+  gl_Position = proj_view * vec4(pos, 1);
+  vdir = pos.xyz;
 }
 )";
 
@@ -89,15 +83,15 @@ uniform sampler2D envmap;
 out vec4 color;
 in vec3 vdir;
 void main(void) {
-	const float PI = 3.1415926535897932384626433832795;
+  const float PI = 3.1415926535897932384626433832795;
 
-	vec3 dir = normalize(vdir);
-	// Note: The panoramic camera uses flipped theta/phi terminology
-	// compared to wolfram alpha or other parametric sphere equations
-	// In the map phi goes along x from [0, 2pi] and theta goes along y [0, pi]
-	float u = (atan(dir.z, dir.x) + PI / 2) / (2 * PI);
-	float v = acos(dir.y) / PI;
-	color = texture(envmap, vec2(u, v));
+  vec3 dir = normalize(vdir);
+  // Note: The panoramic camera uses flipped theta/phi terminology
+  // compared to wolfram alpha or other parametric sphere equations
+  // In the map phi goes along x from [0, 2pi] and theta goes along y [0, pi]
+  float u = (atan(dir.z, dir.x) + PI / 2) / (2 * PI);
+  float v = acos(dir.y) / PI;
+  color = texture(envmap, vec2(u, v));
 }
 )";
 
@@ -146,7 +140,7 @@ void parseCommandLineSG(int ac, const char **&av, sg::Node &root)
       continue;
 
     while ((f = arg.find(":")) != std::string::npos ||
-           (f = arg.find(",")) != std::string::npos) {
+        (f = arg.find(",")) != std::string::npos) {
       arg[f] = ' ';
     }
 
@@ -208,101 +202,62 @@ void parseCommandLineSG(int ac, const char **&av, sg::Node &root)
   }
 }
 
-void addPlaneToScene(sg::Node& world)
-{
-  auto bbox = world.bounds();
-  if (bbox.empty()) {
-    bbox.lower = vec3f(-5,0,-5);
-    bbox.upper = vec3f(5,10,5);
-  }
-
-  osp::vec3f *vertices = new osp::vec3f[4];
-  float ps = bbox.upper.x*3.f;
-  float py = bbox.lower.z-.1f;
-
-  py = bbox.lower.y+0.01f;
-  vertices[0] = osp::vec3f{-ps, py, -ps};
-  vertices[1] = osp::vec3f{-ps, py, ps};
-  vertices[2] = osp::vec3f{ps, py, -ps};
-  vertices[3] = osp::vec3f{ps, py, ps};
-  auto position = std::make_shared<sg::DataArray3f>((vec3f*)&vertices[0],
-                                                    size_t(4),
-                                                    false);
-  osp::vec3i *triangles = new osp::vec3i[2];
-  triangles[0] = osp::vec3i{0,1,2};
-  triangles[1] = osp::vec3i{1,2,3};
-  auto index = std::make_shared<sg::DataArray3i>((vec3i*)&triangles[0],
-                                                 size_t(2),
-                                                 false);
-  auto &plane = world.createChild("plane", "Instance");
-  auto &mesh  = plane.child("model").createChild("mesh", "TriangleMesh");
-
-  std::shared_ptr<sg::TriangleMesh> sg_plane =
-    std::static_pointer_cast<sg::TriangleMesh>(mesh.shared_from_this());
-  sg_plane->vertex = position;
-  sg_plane->index = index;
-  auto &planeMaterial = mesh["material"];
-  planeMaterial["Kd"].setValue(vec3f(0.5f));
-  planeMaterial["Ks"].setValue(vec3f(0.6f));
-  planeMaterial["Ns"].setValue(2.f);
-}
 //
 // end sg stuff
 //
-
 
 const int PANORAMIC_HEIGHT = 1024;
 const int PANORAMIC_WIDTH = 2 * PANORAMIC_HEIGHT;
 
 struct AsyncRenderer {
-	OSPRenderer renderer;
-	OSPFrameBuffer fb;
-	std::atomic<bool> should_quit, new_pixels;
+  OSPRenderer renderer;
+  OSPFrameBuffer fb;
+  std::atomic<bool> should_quit, new_pixels;
 
-	AsyncRenderer(OSPRenderer ren, OSPFrameBuffer fb);
-	~AsyncRenderer();
-	const uint32_t* map_fb();
-	void unmap_fb();
+  AsyncRenderer(OSPRenderer ren, OSPFrameBuffer fb);
+  ~AsyncRenderer();
+  const uint32_t* map_fb();
+  void unmap_fb();
   virtual void start()
   {
     render_thread = std::thread([&](){ run(); });
   }
 
 protected:
-	std::mutex pixel_lock;
-	std::vector<uint32_t> pixels;
-	std::thread render_thread;
+  std::mutex pixel_lock;
+  std::vector<uint32_t> pixels;
+  std::thread render_thread;
 
   virtual void run();
 };
 
-AsyncRenderer::AsyncRenderer(OSPRenderer ren, OSPFrameBuffer fb)
-	: renderer(ren), fb(fb), should_quit(false), new_pixels(false),
-	pixels(PANORAMIC_WIDTH * PANORAMIC_HEIGHT, 0)
+  AsyncRenderer::AsyncRenderer(OSPRenderer ren, OSPFrameBuffer fb)
+: renderer(ren), fb(fb), should_quit(false), new_pixels(false),
+  pixels(PANORAMIC_WIDTH * PANORAMIC_HEIGHT, 0)
 {
 }
 AsyncRenderer::~AsyncRenderer() {
-	should_quit.store(true);
-	render_thread.join();
+  should_quit.store(true);
+  render_thread.join();
 }
 const uint32_t* AsyncRenderer::map_fb() {
-	pixel_lock.lock();
-	new_pixels.store(false);
-	return pixels.data();
+  pixel_lock.lock();
+  new_pixels.store(false);
+  return pixels.data();
 }
 void AsyncRenderer::unmap_fb() {
-	pixel_lock.unlock();
+  pixel_lock.unlock();
 }
 void AsyncRenderer::run() {
-	while (!should_quit.load()) {
-		ospRenderFrame(fb, renderer, OSP_FB_COLOR);
+  while (!should_quit.load()) {
+    ospRenderFrame(fb, renderer, OSP_FB_COLOR);
 
-		const uint32_t *data = static_cast<const uint32_t*>(ospMapFrameBuffer(fb, OSP_FB_COLOR));
-		std::lock_guard<std::mutex> lock(pixel_lock);
-		std::memcpy(pixels.data(), data, sizeof(uint32_t) * PANORAMIC_WIDTH * PANORAMIC_HEIGHT);
-		new_pixels.store(true);
-		ospUnmapFrameBuffer(data, fb);
-	}
+    const uint32_t *data = static_cast<const uint32_t*>(ospMapFrameBuffer(fb, OSP_FB_COLOR));
+    std::lock_guard<std::mutex> lock(pixel_lock);
+    std::memcpy(pixels.data(), data, sizeof(uint32_t) * PANORAMIC_WIDTH * PANORAMIC_HEIGHT);
+    new_pixels.store(true);
+    ospUnmapFrameBuffer(data, fb);
+  }
 }
 
 struct AsyncRendererSg : public AsyncRenderer
@@ -314,12 +269,11 @@ struct AsyncRendererSg : public AsyncRenderer
 
   virtual void run() {
     while (!should_quit.load()) {
-      //      ospRenderFrame(fb, renderer, OSP_FB_COLOR);
       auto &sgFB = sgRenderer->child("frameBuffer");
       auto sgFBptr =
-          std::static_pointer_cast<sg::FrameBuffer>(sgFB.shared_from_this());
+        std::static_pointer_cast<sg::FrameBuffer>(sgFB.shared_from_this());
 
-      static bool once = false;  //TODO: initial commit as timestamp can not
+      static bool once = false;
       if (sgRenderer->childrenLastModified() > lastRTime || !once) {
         sgRenderer->traverse("verify");
         sgRenderer->traverse("commit");
@@ -340,8 +294,6 @@ struct AsyncRendererSg : public AsyncRenderer
     render_thread = std::thread([&](){ run(); });
   }
 
-
-
 protected:
   const std::shared_ptr<sg::Node> sgRenderer;
   sg::TimeStamp  lastRTime;
@@ -350,32 +302,32 @@ protected:
 GLuint load_shader_program(const std::string &vshader_src, const std::string &fshader_src);
 
 int main(int argc, const char **argv) {
-	if (argc < 2) {
-		std::cout << "Usage: ./osp360 <obj file>\n";
-		return 1;
-	}
-	if (SDL_Init(SDL_INIT_EVERYTHING) != 0) {
-		return 1;
-	}
+  if (argc < 2) {
+    std::cout << "Usage: ./osp360 <obj file>\n";
+    return 1;
+  }
+  if (SDL_Init(SDL_INIT_EVERYTHING) != 0) {
+    return 1;
+  }
 
-	ospInit(&argc, argv);
+  ospInit(&argc, argv);
 
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
-	SDL_Window *window = SDL_CreateWindow("osp360", SDL_WINDOWPOS_CENTERED,
-			SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_OPENGL);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
+  SDL_Window *window = SDL_CreateWindow("osp360", SDL_WINDOWPOS_CENTERED,
+      SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_OPENGL);
 
-	if (!window) {
-		return 1;
-	}
-	SDL_GLContext ctx = SDL_GL_CreateContext(window);
-	SDL_GL_SetSwapInterval(1);
+  if (!window) {
+    return 1;
+  }
+  SDL_GLContext ctx = SDL_GL_CreateContext(window);
+  SDL_GL_SetSwapInterval(1);
 
-	if (gl3wInit()) {
-		throw std::runtime_error("Failed to init gl3w");
-	}
+  if (gl3wInit()) {
+    throw std::runtime_error("Failed to init gl3w");
+  }
   for (int i = 0; i < argc; ++i) {
     if (std::strcmp(argv[i], "-gldebug") == 0) {
       register_debug_callback();
@@ -451,82 +403,68 @@ int main(int argc, const char **argv) {
   // end sg init
   //
 
-	// Load the model w/ tinyobjloader
-	tinyobj::attrib_t attrib;
-	std::vector<tinyobj::shape_t> shapes;
-	std::vector<tinyobj::material_t> materials;
-	std::string err;
-	bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &err, argv[1],
-			nullptr, true);
-	if (!err.empty()) {
-		std::cerr << "Error loading model: " << err << "\n";
-	}
-	if (!ret) {
-		return 1;
-	}
-
   // Render one initial frame then kick off the background rendering thread
   renderer.traverse("render");
   auto sgFBptr =
-      std::static_pointer_cast<sg::FrameBuffer>(renderer["frameBuffer"].shared_from_this());
+    std::static_pointer_cast<sg::FrameBuffer>(renderer["frameBuffer"].shared_from_this());
   const uint32_t *data = (uint32_t*)sgFBptr->map();
-	GLuint tex;
-	glGenTextures(1, &tex);
-	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, tex);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, PANORAMIC_WIDTH, PANORAMIC_HEIGHT, 0,
-			GL_RGBA, GL_UNSIGNED_BYTE, data);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  GLuint tex;
+  glGenTextures(1, &tex);
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, tex);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, PANORAMIC_WIDTH, PANORAMIC_HEIGHT, 0,
+      GL_RGBA, GL_UNSIGNED_BYTE, data);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   sgFBptr->unmap(data);
-	glActiveTexture(GL_TEXTURE0);
+  glActiveTexture(GL_TEXTURE0);
 
   std::cout << "starting async renderer" << std::endl;
   AsyncRendererSg async_renderer(renderer_ptr);
   async_renderer.start();
 
-	glEnable(GL_DEPTH_TEST);
-	glClearColor(0, 0, 0, 1);
-	glClearDepth(1);
+  glEnable(GL_DEPTH_TEST);
+  glClearColor(0, 0, 0, 1);
+  glClearDepth(1);
 
-	GLuint vao, vbo;
-	glGenVertexArrays(1, &vao);
-	glGenBuffers(1, &vbo);
-	glBindVertexArray(vao);
-	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(float) * CUBE_STRIP.size(),
-			CUBE_STRIP.data(), GL_STATIC_DRAW);
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+  GLuint vao, vbo;
+  glGenVertexArrays(1, &vao);
+  glGenBuffers(1, &vbo);
+  glBindVertexArray(vao);
+  glBindBuffer(GL_ARRAY_BUFFER, vbo);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(float) * CUBE_STRIP.size(),
+      CUBE_STRIP.data(), GL_STATIC_DRAW);
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
 
-	GLuint shader = load_shader_program(vsrc, fsrc);
-	glUseProgram(shader);
+  GLuint shader = load_shader_program(vsrc, fsrc);
+  glUseProgram(shader);
 
-	glUniform1i(glGetUniformLocation(shader, "envmap"), 1);
-	const GLuint proj_view_unif = glGetUniformLocation(shader, "proj_view");
+  glUniform1i(glGetUniformLocation(shader, "envmap"), 1);
+  const GLuint proj_view_unif = glGetUniformLocation(shader, "proj_view");
 
 #ifdef OPENVR_ENABLED
-	OpenVRDisplay vr_display;
+  OpenVRDisplay vr_display;
 #else
-	const glm::mat4 proj_view = glm::perspective(glm::radians(65.f), 1280.f / 720.f, 0.01f, 10.f)
-		* glm::lookAt(glm::vec3(0), glm::vec3(1, 0, 0), glm::vec3(0, 1, 0));
-	glUniformMatrix4fv(proj_view_unif, 1, GL_FALSE, glm::value_ptr(proj_view));
+  const glm::mat4 proj_view = glm::perspective(glm::radians(65.f), 1280.f / 720.f, 0.01f, 10.f)
+    * glm::lookAt(glm::vec3(0), glm::vec3(1, 0, 0), glm::vec3(0, 1, 0));
+  glUniformMatrix4fv(proj_view_unif, 1, GL_FALSE, glm::value_ptr(proj_view));
 #endif
 
-	bool quit = false;
+  bool quit = false;
   bool interactiveCamera = false;
   bool interacting = false;
   sg::TimeStamp lastRenderTime;
   sg::TimeStamp lastUpdateTime;
   float stepsize = 2.f;
-	while (!quit) {
-		SDL_Event e;
+  while (!quit) {
+    SDL_Event e;
     bool moved = false;
-		while (SDL_PollEvent(&e)) {
-			if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)){
-				quit = true;
-				break;
-			}
+    while (SDL_PollEvent(&e)) {
+      if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)){
+        quit = true;
+        break;
+      }
       else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_UP){
         renderer.setChild("camera", perspectiveCamera);
         auto eye = perspectiveCamera->child("pos").valueAs<ospcommon::vec3f>();
@@ -556,7 +494,7 @@ int main(int argc, const char **argv) {
       else if (e.type == SDL_KEYUP) {
         interacting = false;
       }
-		}
+    }
     if (!moved && interactiveCamera && !interacting)
     {
       renderer.setChild("camera", panoramicCamera);
@@ -564,91 +502,91 @@ int main(int argc, const char **argv) {
       panoramicCamera->setChildrenModified(sg::TimeStamp());
       interactiveCamera = false;
     }
-		if (async_renderer.new_pixels.load()) {
-			glActiveTexture(GL_TEXTURE1);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, PANORAMIC_WIDTH, PANORAMIC_HEIGHT, 0,
-					GL_RGBA, GL_UNSIGNED_BYTE, async_renderer.map_fb());
-			async_renderer.unmap_fb();
-			glActiveTexture(GL_TEXTURE0);
+    if (async_renderer.new_pixels.load()) {
+      glActiveTexture(GL_TEXTURE1);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, PANORAMIC_WIDTH, PANORAMIC_HEIGHT, 0,
+          GL_RGBA, GL_UNSIGNED_BYTE, async_renderer.map_fb());
+      async_renderer.unmap_fb();
+      glActiveTexture(GL_TEXTURE0);
       lastRenderTime = sg::TimeStamp();
-		}
+    }
 
 #ifdef OPENVR_ENABLED
-		vr_display.begin_frame();
-		for (size_t i = 0; i < 2; ++i) {
-			glm::mat4 proj, view;
-			vr_display.begin_eye(i, view, proj);
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    vr_display.begin_frame();
+    for (size_t i = 0; i < 2; ++i) {
+      glm::mat4 proj, view;
+      vr_display.begin_eye(i, view, proj);
+      glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-			// Remove translation from the view matrix
-			view[3] = glm::vec4(0, 0, 0, 1);
-			glm::mat4 proj_view = proj * view;
-			glUniformMatrix4fv(proj_view_unif, 1, GL_FALSE, glm::value_ptr(proj_view));
+      // Remove translation from the view matrix
+      view[3] = glm::vec4(0, 0, 0, 1);
+      glm::mat4 proj_view = proj * view;
+      glUniformMatrix4fv(proj_view_unif, 1, GL_FALSE, glm::value_ptr(proj_view));
 
-			glDrawArrays(GL_TRIANGLE_STRIP, 0, CUBE_STRIP.size() / 3);
-		}
-		vr_display.submit();
+      glDrawArrays(GL_TRIANGLE_STRIP, 0, CUBE_STRIP.size() / 3);
+    }
+    vr_display.submit();
 #endif
 
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-		glViewport(0, 0, 1280, 720);
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		glDrawArrays(GL_TRIANGLE_STRIP, 0, CUBE_STRIP.size() / 3);
-		SDL_GL_SwapWindow(window);
-	}
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, 1280, 720);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, CUBE_STRIP.size() / 3);
+    SDL_GL_SwapWindow(window);
+  }
 
-	glDeleteProgram(shader);
-	glDeleteTextures(1, &tex);
-	glDeleteBuffers(1, &vbo);
-	glDeleteVertexArrays(1, &vao);
+  glDeleteProgram(shader);
+  glDeleteTextures(1, &tex);
+  glDeleteBuffers(1, &vbo);
+  glDeleteVertexArrays(1, &vao);
 
-	SDL_GL_DeleteContext(ctx);
-	SDL_DestroyWindow(window);
-	SDL_Quit();
-	return 0;
+  SDL_GL_DeleteContext(ctx);
+  SDL_DestroyWindow(window);
+  SDL_Quit();
+  return 0;
 }
 GLuint compile_shader(const std::string &src, GLenum type) {
-	GLuint shader = glCreateShader(type);
-	const char *csrc = src.c_str();
-	glShaderSource(shader, 1, &csrc, 0);
-	glCompileShader(shader);
+  GLuint shader = glCreateShader(type);
+  const char *csrc = src.c_str();
+  glShaderSource(shader, 1, &csrc, 0);
+  glCompileShader(shader);
 
-	GLint status;
-	glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
-	if (status == GL_FALSE) {
-		std::cout << "Shader compilation error:\n";
-		GLint len;
-		glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
-		std::vector<char> log(len, 0);
-		glGetShaderInfoLog(shader, log.size(), 0, log.data());
-		std::cout << log.data() << "\n";
-		throw std::runtime_error("Shader compilation failed");
-	}
-	return shader;
+  GLint status;
+  glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+  if (status == GL_FALSE) {
+    std::cout << "Shader compilation error:\n";
+    GLint len;
+    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
+    std::vector<char> log(len, 0);
+    glGetShaderInfoLog(shader, log.size(), 0, log.data());
+    std::cout << log.data() << "\n";
+    throw std::runtime_error("Shader compilation failed");
+  }
+  return shader;
 }
 GLuint load_shader_program(const std::string &vshader_src, const std::string &fshader_src) {
-	GLuint vs = compile_shader(vshader_src, GL_VERTEX_SHADER);
-	GLuint fs = compile_shader(fshader_src, GL_FRAGMENT_SHADER);
-	GLuint prog = glCreateProgram();
-	glAttachShader(prog, vs);
-	glAttachShader(prog, fs);
-	glLinkProgram(prog);
+  GLuint vs = compile_shader(vshader_src, GL_VERTEX_SHADER);
+  GLuint fs = compile_shader(fshader_src, GL_FRAGMENT_SHADER);
+  GLuint prog = glCreateProgram();
+  glAttachShader(prog, vs);
+  glAttachShader(prog, fs);
+  glLinkProgram(prog);
 
-	GLint status;
-	glGetProgramiv(prog, GL_LINK_STATUS, &status);
-	if (status == GL_FALSE) {
-		std::cout << "Shader link error:\n";
-		GLint len;
-		glGetProgramiv(prog, GL_INFO_LOG_LENGTH, &len);
-		std::vector<char> log(len, 0);
-		glGetProgramInfoLog(prog, log.size(), 0, log.data());
-		std::cout << log.data() << "\n";
-		throw std::runtime_error("Shader link failed");
-	}
-	glDetachShader(prog, vs);
-	glDetachShader(prog, fs);
-	glDeleteShader(vs);
-	glDeleteShader(fs);
-	return prog;
+  GLint status;
+  glGetProgramiv(prog, GL_LINK_STATUS, &status);
+  if (status == GL_FALSE) {
+    std::cout << "Shader link error:\n";
+    GLint len;
+    glGetProgramiv(prog, GL_INFO_LOG_LENGTH, &len);
+    std::vector<char> log(len, 0);
+    glGetProgramInfoLog(prog, log.size(), 0, log.data());
+    std::cout << log.data() << "\n";
+    throw std::runtime_error("Shader link failed");
+  }
+  glDetachShader(prog, vs);
+  glDetachShader(prog, fs);
+  glDeleteShader(vs);
+  glDeleteShader(fs);
+  return prog;
 }
 
