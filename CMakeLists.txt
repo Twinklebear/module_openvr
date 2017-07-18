@@ -42,7 +42,6 @@ if (OSPRAY_MODULE_OPENVR)
     ${LIBS}
     ospray
     ospray_common
-    ospray_commandline
     ospray_sg
     )
 endif()
