@@ -352,14 +352,16 @@ int main(int argc, const char **argv) {
   renderer["autoEpsilon"].setValue(false);
   auto panoramicCamera = sg::createNode("camera", "PanoramicCamera");
   auto perspectiveCamera = renderer["camera"].shared_from_this();
+
   renderer.setChild("camera", panoramicCamera);
   panoramicCamera->setParent(renderer);
-  panoramicCamera->child("pos").setValue(ospcommon::vec3f{21, 242, -49});
+  panoramicCamera->child("pos").setValue(ospcommon::vec3f{21, 200, -49});
   panoramicCamera->child("dir").setValue(ospcommon::vec3f{0, 0, 1});
   panoramicCamera->child("up").setValue(ospcommon::vec3f{0, -1, 0});
   perspectiveCamera->child("pos").setValue(ospcommon::vec3f{21, 242, -49});
   perspectiveCamera->child("dir").setValue(ospcommon::vec3f{0, 0, 1});
   perspectiveCamera->child("up").setValue(ospcommon::vec3f{0, -1, 0});
+  perspectiveCamera->child("fovy").setValue(110.0f);
   renderer["spp"].setValue(-1);
 
   renderer["frameBuffer"]["size"].setValue(ospcommon::vec2i(PANORAMIC_WIDTH, PANORAMIC_HEIGHT));
@@ -448,7 +450,6 @@ int main(int argc, const char **argv) {
 
 #ifdef OPENVR_ENABLED
   OpenVRDisplay vr_display;
-#else
   const glm::mat4 proj_view = glm::perspective(glm::radians(65.f),
 		  static_cast<float>(MIRROR_WIDTH) / MIRROR_HEIGHT, 0.01f, 10.f)
     * glm::lookAt(glm::vec3(0), glm::vec3(1, 0, 0), glm::vec3(0, 1, 0));
@@ -468,14 +469,31 @@ int main(int argc, const char **argv) {
       if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)){
         quit = true;
         break;
-      }
+      } else if (e.type == SDL_KEYDOWN) {
+		  switch (e.key.keysym.sym) {
+			  case SDLK_1:
+				  panoramicCamera->child("pos").setValue(ospcommon::vec3f{21, 200, -49});
+				  break;
+			  case SDLK_2:
+				  panoramicCamera->child("pos").setValue(ospcommon::vec3f{800, 200, -49});
+				  break;
+			  case SDLK_3:
+				  panoramicCamera->child("pos").setValue(ospcommon::vec3f{-1200, 200, -45});
+				  break;
+			  case SDLK_4:
+				  panoramicCamera->child("pos").setValue(ospcommon::vec3f{-720, 600, 180});
+				  break;
+			  default: break;
+		  }
+	  }
+	  /*
       else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_UP){
         renderer.setChild("camera", perspectiveCamera);
         auto eye = perspectiveCamera->child("pos").valueAs<ospcommon::vec3f>();
         auto dir = perspectiveCamera->child("dir").valueAs<ospcommon::vec3f>();
         eye += dir*stepsize;
-        renderer["camera"]["pos"].setValue(eye);
         panoramicCamera->child("pos").setValue(eye);
+		perspectiveCamera->child("pos").setValue(eye);
         moved = true;
         interactiveCamera = true;
         lastUpdateTime = sg::TimeStamp();
@@ -487,14 +505,15 @@ int main(int argc, const char **argv) {
         auto eye = perspectiveCamera->child("pos").valueAs<ospcommon::vec3f>();
         auto dir = perspectiveCamera->child("dir").valueAs<ospcommon::vec3f>();
         eye -= dir*stepsize;
-        renderer["camera"]["pos"].setValue(eye);
         panoramicCamera->child("pos").setValue(eye);
+		perspectiveCamera->child("pos").setValue(eye);
         interactiveCamera = true;
         moved = true;
         lastUpdateTime = sg::TimeStamp();
         interacting = true;
         break;
       }
+	  */
       else if (e.type == SDL_KEYUP) {
         interacting = false;
       }
