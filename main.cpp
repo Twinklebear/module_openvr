@@ -41,7 +41,7 @@
 #include "ospcommon/networking/Socket.h"
 #include "ospcommon/vec.h"
 #include "sg/geometry/TriangleMesh.h"
-#include "widgets/imguiViewerSg.h"
+#include "widgets/imguiViewer.h"
 
 #include "openvr_display.h"
 #include "gldebug.h"
@@ -209,7 +209,7 @@ void parseCommandLineSG(int ac, const char **&av, sg::Node &root)
 // end sg stuff
 //
 
-const int PANORAMIC_HEIGHT = 1024;
+const int PANORAMIC_HEIGHT = 512;
 const int PANORAMIC_WIDTH = 2 * PANORAMIC_HEIGHT;
 
 struct AsyncRenderer {
@@ -389,10 +389,15 @@ int main(int argc, const char **argv) {
 
   for (auto file : files) {
     FileName fn = file;
-    auto importerNode_ptr = sg::createNode(fn.name(), "Importer");
-    auto &importerNode = *importerNode_ptr;
-    importerNode["fileName"].setValue(fn.str());
-    world += importerNode_ptr;
+    if (fn.ext() == "ospsg") {
+      sg::loadOSPSG(renderer.shared_from_this(), fn.str());
+    } else {
+      auto importerNode_ptr = sg::createNode(fn.name(), "Importer");
+      auto &importerNode = *importerNode_ptr;
+      importerNode["fileName"] = fn.str();
+      auto &transform = world.createChild("transform_"+fn.str(), "Transform");
+      transform.add(importerNode_ptr);
+    }
   }
 
   parseCommandLineSG(argc, argv, renderer);
