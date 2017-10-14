@@ -285,11 +285,11 @@ struct AsyncRendererSg : public AsyncRenderer
       lastRTime = sg::TimeStamp();
       sgRenderer->traverse("render");
 
-      uint8_t *data = sgFBptr->map();
+      auto *data = sgFBptr->map();
       std::lock_guard<std::mutex> lock(pixel_lock);
       std::memcpy(pixels.data(), data, sizeof(uint32_t) * PANORAMIC_WIDTH * PANORAMIC_HEIGHT);
       new_pixels.store(true);
-      sgFBptr->unmap(static_cast<void*>(data));
+      sgFBptr->unmap(data);
     }
   }
   virtual void start()
