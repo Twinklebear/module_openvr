@@ -40,6 +40,7 @@
 #include "ospcommon/FileName.h"
 #include "ospcommon/networking/Socket.h"
 #include "ospcommon/vec.h"
+#include "ospcommon/utility/SaveImage.h"
 #include "sg/geometry/TriangleMesh.h"
 #include "widgets/imguiViewer.h"
 
@@ -285,11 +286,11 @@ struct AsyncRendererSg : public AsyncRenderer
       lastRTime = sg::TimeStamp();
       sgRenderer->traverse("render");
 
-      auto *data = sgFBptr->map();
+      uint8_t *data = sgFBptr->map();
       std::lock_guard<std::mutex> lock(pixel_lock);
       std::memcpy(pixels.data(), data, sizeof(uint32_t) * PANORAMIC_WIDTH * PANORAMIC_HEIGHT);
       new_pixels.store(true);
-      sgFBptr->unmap(data);
+      sgFBptr->unmap(static_cast<void*>(data));
     }
   }
   virtual void start()
@@ -453,12 +454,13 @@ int main(int argc, const char **argv) {
   glUniform1i(glGetUniformLocation(shader, "envmap"), 1);
   const GLuint proj_view_unif = glGetUniformLocation(shader, "proj_view");
 
-#ifdef OPENVR_ENABLED
-  OpenVRDisplay vr_display;
   const glm::mat4 proj_view = glm::perspective(glm::radians(65.f),
 		  static_cast<float>(MIRROR_WIDTH) / MIRROR_HEIGHT, 0.01f, 10.f)
     * glm::lookAt(glm::vec3(0), glm::vec3(1, 0, 0), glm::vec3(0, 1, 0));
   glUniformMatrix4fv(proj_view_unif, 1, GL_FALSE, glm::value_ptr(proj_view));
+
+#ifdef OPENVR_ENABLED
+  OpenVRDisplay vr_display;
 #endif
 
   bool quit = false;
