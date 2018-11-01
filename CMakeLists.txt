@@ -42,6 +42,7 @@ if (OSPRAY_MODULE_OPENVR)
     ${LIBS}
     ospray
     ospray_sg
+    ospray_imgui_util_sg
     )
 endif()
 

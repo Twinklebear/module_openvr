@@ -34,6 +34,7 @@
 // sg stuff
 #include "common/sg/SceneGraph.h"
 #include "common/sg/Renderer.h"
+#include "common/sg/common/FrameBuffer.h"
 #include "common/sg/importer/Importer.h"
 #include "ospcommon/utility/TimeStamp.h"
 #include "sg/common/FrameBuffer.h"
@@ -43,6 +44,7 @@
 #include "ospcommon/utility/SaveImage.h"
 #include "sg/geometry/TriangleMesh.h"
 #include "widgets/imguiViewer.h"
+#include "common/util/AsyncRenderEngine.h"
 
 #include "openvr_display.h"
 #include "gldebug.h"
@@ -213,100 +215,6 @@ void parseCommandLineSG(int ac, const char **&av, sg::Node &root)
 const int PANORAMIC_HEIGHT = 512;
 const int PANORAMIC_WIDTH = 2 * PANORAMIC_HEIGHT;
 
-struct AsyncRenderer {
-  OSPRenderer renderer;
-  OSPFrameBuffer fb;
-  std::atomic<bool> should_quit, new_pixels;
-
-  AsyncRenderer(OSPRenderer ren, OSPFrameBuffer fb);
-  ~AsyncRenderer();
-  const uint32_t* map_fb();
-  void unmap_fb();
-  virtual void start()
-  {
-    render_thread = std::thread([&](){ run(); });
-  }
-
-protected:
-  std::mutex pixel_lock;
-  std::vector<uint32_t> pixels;
-  std::thread render_thread;
-
-  virtual void run();
-};
-
-  AsyncRenderer::AsyncRenderer(OSPRenderer ren, OSPFrameBuffer fb)
-: renderer(ren), fb(fb), should_quit(false), new_pixels(false),
-  pixels(PANORAMIC_WIDTH * PANORAMIC_HEIGHT, 0)
-{
-}
-AsyncRenderer::~AsyncRenderer() {
-  should_quit.store(true);
-  render_thread.join();
-}
-const uint32_t* AsyncRenderer::map_fb() {
-  pixel_lock.lock();
-  new_pixels.store(false);
-  return pixels.data();
-}
-void AsyncRenderer::unmap_fb() {
-  pixel_lock.unlock();
-}
-void AsyncRenderer::run() {
-  while (!should_quit.load()) {
-    ospRenderFrame(fb, renderer, OSP_FB_COLOR);
-
-    const uint32_t *data = static_cast<const uint32_t*>(ospMapFrameBuffer(fb, OSP_FB_COLOR));
-    std::lock_guard<std::mutex> lock(pixel_lock);
-    std::memcpy(pixels.data(), data, sizeof(uint32_t) * PANORAMIC_WIDTH * PANORAMIC_HEIGHT);
-    new_pixels.store(true);
-    ospUnmapFrameBuffer(data, fb);
-  }
-}
-
-struct AsyncRendererSg : public AsyncRenderer
-{
-  AsyncRendererSg(const std::shared_ptr<sg::Node> sgRenderer,
-                  std::shared_ptr<sg::RenderContext> renderCtx)
-    : sgRenderer(sgRenderer),
-    renderCtx(renderCtx),
-    AsyncRenderer(nullptr,nullptr)
-  {
-  }
-
-  virtual void run() {
-    while (!should_quit.load()) {
-      auto &sgFB = sgRenderer->child("frameBuffer");
-      auto sgFBptr =
-        std::static_pointer_cast<sg::FrameBuffer>(sgFB.shared_from_this());
-
-      static bool once = false;
-      if (sgRenderer->childrenLastModified() > lastRTime || !once) {
-        sgRenderer->verify();
-        sgRenderer->commit();
-      }
-      once = true;
-      lastRTime = ospcommon::utility::TimeStamp();
-      sgRenderer->finalize(*renderCtx);
-
-      const uint8_t *data = reinterpret_cast<const uint8_t*>(sgFBptr->map());
-      std::lock_guard<std::mutex> lock(pixel_lock);
-      std::memcpy(pixels.data(), data, sizeof(uint32_t) * PANORAMIC_WIDTH * PANORAMIC_HEIGHT);
-      new_pixels.store(true);
-      sgFBptr->unmap(const_cast<uint8_t*>(data));
-    }
-  }
-  virtual void start()
-  {
-    render_thread = std::thread([&](){ run(); });
-  }
-
-protected:
-  const std::shared_ptr<sg::Node> sgRenderer;
-  std::shared_ptr<sg::RenderContext> renderCtx;
-  ospcommon::utility::TimeStamp  lastRTime;
-};
-
 GLuint load_shader_program(const std::string &vshader_src, const std::string &fshader_src);
 
 int main(int argc, const char **argv) {
@@ -347,8 +255,8 @@ int main(int argc, const char **argv) {
   ospcommon::LibraryRepository::getInstance()->add("ospray_sg");
 
   parseCommandLine(argc, argv);
-  auto renderer_ptr = sg::createNode("renderer", "Renderer");
-  auto &renderer = *renderer_ptr;
+  std::shared_ptr<sg::Frame> scenegraph = std::make_shared<sg::Frame>();
+  sg::Node &renderer = scenegraph->child("renderer");
 
   renderer["maxDepth"].setValue(3);
   renderer["shadowsEnabled"].setValue(true);
@@ -356,20 +264,16 @@ int main(int argc, const char **argv) {
   renderer["aoDistance"].setValue(500.f);
   renderer["autoEpsilon"].setValue(false);
   auto panoramicCamera = sg::createNode("camera", "PanoramicCamera");
-  //auto perspectiveCamera = renderer["camera"].shared_from_this();
 
-  renderer.setChild("camera", panoramicCamera);
-  panoramicCamera->setParent(renderer);
+  scenegraph->setChild("camera", panoramicCamera);
+  panoramicCamera->setParent(scenegraph);
   panoramicCamera->child("pos").setValue(ospcommon::vec3f{21, 200, -49});
   panoramicCamera->child("dir").setValue(ospcommon::vec3f{0, 0, 1});
   panoramicCamera->child("up").setValue(ospcommon::vec3f{0, -1, 0});
-  //perspectiveCamera->child("pos").setValue(ospcommon::vec3f{21, 242, -49});
-  //perspectiveCamera->child("dir").setValue(ospcommon::vec3f{0, 0, 1});
-  //perspectiveCamera->child("up").setValue(ospcommon::vec3f{0, -1, 0});
-  //perspectiveCamera->child("fovy").setValue(110.0f);
   renderer["spp"].setValue(-1);
 
-  renderer["frameBuffer"]["size"].setValue(ospcommon::vec2i(PANORAMIC_WIDTH, PANORAMIC_HEIGHT));
+  scenegraph->child("frameBuffer")["size"].setValue(ospcommon::vec2i(PANORAMIC_WIDTH, PANORAMIC_HEIGHT));
+  scenegraph->add(sg::createNode("navFrameBuffer", "FrameBuffer"), "navFrameBuffer");
   if (!initialRendererType.empty()) {
     renderer["rendererType"].setValue(initialRendererType);
   }
@@ -405,10 +309,10 @@ int main(int argc, const char **argv) {
     }
   }
 
-  parseCommandLineSG(argc, argv, renderer);
+  parseCommandLineSG(argc, argv, *scenegraph);
 
-  renderer.verify();
-  renderer.commit();
+  scenegraph->verify();
+  scenegraph->commit();
 
   std::cout << "sg init finished" << std::endl;
 
@@ -420,9 +324,8 @@ int main(int argc, const char **argv) {
     = std::make_shared<ospray::sg::RenderContext>();
 
   // Render one initial frame then kick off the background rendering thread
-  renderer.finalize(*render_ctx);
-  auto sgFBptr =
-    std::static_pointer_cast<sg::FrameBuffer>(renderer["frameBuffer"].shared_from_this());
+  scenegraph->finalize(*render_ctx);
+  auto sgFBptr = scenegraph->renderFrame(true);
   const uint32_t *data = (uint32_t*)sgFBptr->map();
   GLuint tex;
   glGenTextures(1, &tex);
@@ -436,7 +339,7 @@ int main(int argc, const char **argv) {
   glActiveTexture(GL_TEXTURE0);
 
   std::cout << "starting async renderer" << std::endl;
-  AsyncRendererSg async_renderer(renderer_ptr, render_ctx);
+  AsyncRenderEngine async_renderer(scenegraph);
   async_renderer.start();
 
   glEnable(GL_DEPTH_TEST);
@@ -537,11 +440,13 @@ int main(int argc, const char **argv) {
       panoramicCamera->setChildrenModified(sg::TimeStamp());
       interactiveCamera = false;
     }
-    if (async_renderer.new_pixels.load()) {
+    if (async_renderer.hasNewFrame()) {
+      auto &mappedFB = async_renderer.mapFramebuffer();
+      auto fbData = mappedFB.data();
       glActiveTexture(GL_TEXTURE1);
       glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, PANORAMIC_WIDTH, PANORAMIC_HEIGHT, 0,
-          GL_RGBA, GL_UNSIGNED_BYTE, async_renderer.map_fb());
-      async_renderer.unmap_fb();
+          GL_RGBA, GL_UNSIGNED_BYTE, fbData);
+      async_renderer.unmapFramebuffer();
       glActiveTexture(GL_TEXTURE0);
       lastRenderTime = sg::TimeStamp();
     }
@@ -569,6 +474,8 @@ int main(int argc, const char **argv) {
     glDrawArrays(GL_TRIANGLE_STRIP, 0, CUBE_STRIP.size() / 3);
     SDL_GL_SwapWindow(window);
   }
+
+  async_renderer.stop();
 
   glDeleteProgram(shader);
   glDeleteTextures(1, &tex);
