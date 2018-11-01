@@ -35,7 +35,7 @@
 #include "common/sg/SceneGraph.h"
 #include "common/sg/Renderer.h"
 #include "common/sg/importer/Importer.h"
-#include "sg/common/TimeStamp.h"
+#include "ospcommon/utility/TimeStamp.h"
 #include "sg/common/FrameBuffer.h"
 #include "ospcommon/FileName.h"
 #include "ospcommon/networking/Socket.h"
@@ -265,8 +265,11 @@ void AsyncRenderer::run() {
 
 struct AsyncRendererSg : public AsyncRenderer
 {
-  AsyncRendererSg(const std::shared_ptr<sg::Node> sgRenderer)
-    : sgRenderer(sgRenderer), AsyncRenderer(nullptr,nullptr)
+  AsyncRendererSg(const std::shared_ptr<sg::Node> sgRenderer,
+                  std::shared_ptr<sg::RenderContext> renderCtx)
+    : sgRenderer(sgRenderer),
+    renderCtx(renderCtx),
+    AsyncRenderer(nullptr,nullptr)
   {
   }
 
@@ -278,12 +281,12 @@ struct AsyncRendererSg : public AsyncRenderer
 
       static bool once = false;
       if (sgRenderer->childrenLastModified() > lastRTime || !once) {
-        sgRenderer->traverse("verify");
-        sgRenderer->traverse("commit");
+        sgRenderer->verify();
+        sgRenderer->commit();
       }
       once = true;
-      lastRTime = sg::TimeStamp();
-      sgRenderer->traverse("render");
+      lastRTime = ospcommon::utility::TimeStamp();
+      sgRenderer->finalize(*renderCtx);
 
       auto *data = sgFBptr->map();
       std::lock_guard<std::mutex> lock(pixel_lock);
@@ -299,7 +302,8 @@ struct AsyncRendererSg : public AsyncRenderer
 
 protected:
   const std::shared_ptr<sg::Node> sgRenderer;
-  sg::TimeStamp  lastRTime;
+  std::shared_ptr<sg::RenderContext> renderCtx;
+  ospcommon::utility::TimeStamp  lastRTime;
 };
 
 GLuint load_shader_program(const std::string &vshader_src, const std::string &fshader_src);
@@ -351,17 +355,17 @@ int main(int argc, const char **argv) {
   renderer["aoDistance"].setValue(500.f);
   renderer["autoEpsilon"].setValue(false);
   auto panoramicCamera = sg::createNode("camera", "PanoramicCamera");
-  auto perspectiveCamera = renderer["camera"].shared_from_this();
+  //auto perspectiveCamera = renderer["camera"].shared_from_this();
 
   renderer.setChild("camera", panoramicCamera);
   panoramicCamera->setParent(renderer);
   panoramicCamera->child("pos").setValue(ospcommon::vec3f{21, 200, -49});
   panoramicCamera->child("dir").setValue(ospcommon::vec3f{0, 0, 1});
   panoramicCamera->child("up").setValue(ospcommon::vec3f{0, -1, 0});
-  perspectiveCamera->child("pos").setValue(ospcommon::vec3f{21, 242, -49});
-  perspectiveCamera->child("dir").setValue(ospcommon::vec3f{0, 0, 1});
-  perspectiveCamera->child("up").setValue(ospcommon::vec3f{0, -1, 0});
-  perspectiveCamera->child("fovy").setValue(110.0f);
+  //perspectiveCamera->child("pos").setValue(ospcommon::vec3f{21, 242, -49});
+  //perspectiveCamera->child("dir").setValue(ospcommon::vec3f{0, 0, 1});
+  //perspectiveCamera->child("up").setValue(ospcommon::vec3f{0, -1, 0});
+  //perspectiveCamera->child("fovy").setValue(110.0f);
   renderer["spp"].setValue(-1);
 
   renderer["frameBuffer"]["size"].setValue(ospcommon::vec2i(PANORAMIC_WIDTH, PANORAMIC_HEIGHT));
@@ -401,11 +405,9 @@ int main(int argc, const char **argv) {
   }
 
   parseCommandLineSG(argc, argv, renderer);
-  if (print || debug)
-    renderer.traverse("print");
 
-  renderer.traverse("verify");
-  renderer.traverse("commit");
+  renderer.verify();
+  renderer.commit();
 
   std::cout << "sg init finished" << std::endl;
 
@@ -413,8 +415,11 @@ int main(int argc, const char **argv) {
   // end sg init
   //
 
+  std::shared_ptr<ospray::sg::RenderContext> render_ctx
+    = std::make_shared<ospray::sg::RenderContext>();
+
   // Render one initial frame then kick off the background rendering thread
-  renderer.traverse("render");
+  renderer.finalize(*render_ctx);
   auto sgFBptr =
     std::static_pointer_cast<sg::FrameBuffer>(renderer["frameBuffer"].shared_from_this());
   const uint32_t *data = (uint32_t*)sgFBptr->map();
@@ -430,7 +435,7 @@ int main(int argc, const char **argv) {
   glActiveTexture(GL_TEXTURE0);
 
   std::cout << "starting async renderer" << std::endl;
-  AsyncRendererSg async_renderer(renderer_ptr);
+  AsyncRendererSg async_renderer(renderer_ptr, render_ctx);
   async_renderer.start();
 
   glEnable(GL_DEPTH_TEST);
