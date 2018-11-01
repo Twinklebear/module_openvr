@@ -320,22 +320,14 @@ int main(int argc, const char **argv) {
   // end sg init
   //
 
-  std::shared_ptr<ospray::sg::RenderContext> render_ctx
-    = std::make_shared<ospray::sg::RenderContext>();
-
-  // Render one initial frame then kick off the background rendering thread
-  scenegraph->finalize(*render_ctx);
-  auto sgFBptr = scenegraph->renderFrame(true);
-  const uint32_t *data = (uint32_t*)sgFBptr->map();
   GLuint tex;
   glGenTextures(1, &tex);
   glActiveTexture(GL_TEXTURE1);
   glBindTexture(GL_TEXTURE_2D, tex);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, PANORAMIC_WIDTH, PANORAMIC_HEIGHT, 0,
-      GL_RGBA, GL_UNSIGNED_BYTE, data);
+      GL_RGBA, GL_UNSIGNED_BYTE, NULL);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  sgFBptr->unmap(data);
   glActiveTexture(GL_TEXTURE0);
 
   std::cout << "starting async renderer" << std::endl;
